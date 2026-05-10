@@ -29,6 +29,7 @@ import {
   INITIAL_SITE_IDS,
   MAX_BUILDS,
   MIN_DEMAND_TO_WIN,
+  getTutorialSequenceProgress,
   TUTORIAL_STEPS,
   WIN_SCORE,
 } from "./data/gameData";
@@ -36,6 +37,7 @@ import type { ActionCard, DataCenterSite } from "./data/gameData";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import {
   calculateScore,
+  completeTutorialStep,
   continueFromReport,
   findAction,
   formatBudget,
@@ -45,7 +47,6 @@ import {
   getAnnualBudget,
   getBudgetRemaining,
   getBuiltSites,
-  getCurrentPeriod,
   getCurrentPeriodLabel,
   getDynamicActionCost,
   getPlannedCost,
@@ -57,11 +58,11 @@ import {
   getUnlockedActions,
   getVisibleMetrics,
   initialGameState,
-  isUnlockStageAvailable,
   removeAction,
   restartRun,
   runAnnualPlan,
   selectAction,
+  selectSite as selectGameSite,
 } from "./lib/gameEngine";
 
 const generatedAssets = {
@@ -77,6 +78,9 @@ const generatedAssets = {
     power: "/generated-assets/labels/power.svg",
     water: "/generated-assets/labels/water.svg",
     year: "/generated-assets/labels/year.svg",
+  },
+  map: {
+    campusMarker: "/generated-assets/objects/data-center-building.svg",
   },
   infrastructure: [
     { name: "GPU Pod", src: "/generated-assets/objects/gpu-pod.svg" },
@@ -103,6 +107,20 @@ function infrastructureAsset(index: number) {
   ];
 }
 
+const CARD_TUTORIAL_ACTIONS: Record<string, string[]> = {
+  colocation: ["lease-colocation"],
+  "campus-expansion": ["expand-campus"],
+  "power-projects": [
+    "renewables-ppa",
+    "grid-interconnect",
+    "fast-gas-capacity",
+  ],
+  "water-reuse": ["water-recycling"],
+  "dry-cooling": ["dry-cooling"],
+  "community-benefits": ["community-benefits"],
+  permitting: ["fast-track-permitting"],
+};
+
 function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="app-shell">
@@ -127,7 +145,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
 function HomePage() {
   const { bestScore } = useLeaderboard();
   const starterSites = DATA_CENTER_SITES.filter((site) =>
-    INITIAL_SITE_IDS.includes(site.id as (typeof INITIAL_SITE_IDS)[number]),
+    INITIAL_SITE_IDS.includes(site.id),
   );
 
   return (
@@ -160,7 +178,7 @@ function HomePage() {
           <div className="hero-stats" aria-label="Current leaderboard summary">
             <div>
               <span>Best score</span>
-              <strong>{bestScore}</strong>
+              <strong>{bestScore ?? "-"}</strong>
             </div>
             <div>
               <span>Campaign</span>
@@ -278,7 +296,7 @@ function SitePanel({
       <div className="turn-strip">
         <span>Market for regional cards</span>
         <small>
-          {state.builtSiteIds.length === 0
+          {sites.length === INITIAL_SITE_IDS.length
             ? `${sites.length} starter choices`
             : `${sites.length} available markets`}
         </small>
@@ -470,6 +488,12 @@ function categoryIcon(card: ActionCard) {
   return <Flag size={17} />;
 }
 
+function cardSiteRequirementLabel(card: ActionCard) {
+  if (card.siteRequirement === "none") return "national";
+  if (card.siteRequirement === "built-site") return "uses built market";
+  return "uses selected market";
+}
+
 function ActionCardGrid({
   state,
   setState,
@@ -489,7 +513,9 @@ function ActionCardGrid({
         const selected = state.selectedActionIds.includes(card.id);
         const cost = getDynamicActionCost(state, card);
         const lockReason =
-          !initialSiteConfirmed && state.periodIndex === 0 && card.requiresSite
+          !initialSiteConfirmed &&
+          state.periodIndex === 0 &&
+          card.siteRequirement !== "none"
             ? "Choose a market first"
             : getActionLockReason(state, card);
         const disabled =
@@ -524,7 +550,7 @@ function ActionCardGrid({
                 card.durationMonths === 0
                   ? "Instant"
                   : `${card.durationMonths} months`
-              } · ${card.requiresSite ? "uses selected market" : "national"}`}
+              } · ${cardSiteRequirementLabel(card)}`}
             </small>
             <p>{card.benefitText}</p>
             <em>{card.riskText}</em>
@@ -816,18 +842,31 @@ function RunSummary({
   const { addEntry } = useLeaderboard();
   const [playerName, setPlayerName] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const builtSites = getBuiltSites(state);
   const score = calculateScore(state);
   const outcome = getRunOutcome(state);
 
-  const saveRun = () => {
-    if (saved) return;
-    addEntry(
-      playerName,
-      score,
-      builtSites.map((site) => site.metro),
-    );
-    setSaved(true);
+  const saveRun = async () => {
+    if (saved || saving) return;
+    setSaving(true);
+    setSaveError(null);
+
+    try {
+      await addEntry(
+        playerName,
+        score,
+        builtSites.map((site) => site.metro),
+      );
+      setSaved(true);
+    } catch (caught) {
+      setSaveError(
+        caught instanceof Error ? caught.message : "Score could not be saved.",
+      );
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -877,15 +916,16 @@ function RunSummary({
           onChange={(event) => setPlayerName(event.target.value)}
         />
       </label>
+      {saveError && <p className="form-error">{saveError}</p>}
       <div className="summary-actions">
         <button
           className="primary-action"
           type="button"
           onClick={saveRun}
-          disabled={saved}
+          disabled={saved || saving}
         >
           <Trophy size={18} />
-          {saved ? "Saved" : "Save score"}
+          {saved ? "Saved" : saving ? "Saving" : "Save score"}
         </button>
         <button
           className="secondary-action"
@@ -907,6 +947,7 @@ type TutorialOverlayProps = {
   step: (typeof TUTORIAL_STEPS)[number] | undefined;
   stepIndex: number;
   stepCount: number;
+  canBack: boolean;
   onNext: () => void;
   onBack: () => void;
   onSkip: () => void;
@@ -917,6 +958,7 @@ function TutorialOverlay({
   step,
   stepIndex,
   stepCount,
+  canBack,
   onNext,
   onBack,
   onSkip,
@@ -988,7 +1030,7 @@ function TutorialOverlay({
             className="ghost-button"
             type="button"
             onClick={onBack}
-            disabled={stepIndex === 0}
+            disabled={!canBack}
           >
             Back
           </button>
@@ -1008,7 +1050,6 @@ function TutorialOverlay({
 function PlayPage() {
   const [state, setState] = useState<GameState>(initialGameState);
   const [showSummary, setShowSummary] = useState(false);
-  const [tutorialActive, setTutorialActive] = useState(true);
   const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
   const [siteTouched, setSiteTouched] = useState(false);
   const [activePanel, setActivePanel] = useState<"market" | "actions" | null>(
@@ -1022,30 +1063,34 @@ function PlayPage() {
   const plannedCost = getPlannedCost(state);
   const score = calculateScore(state);
   const visibleMetrics = getVisibleMetrics(state);
-  const currentPeriod = getCurrentPeriod(state);
-  const availableTutorialSteps = useMemo(
+  const pendingTutorialSteps = useMemo(
     () =>
-      TUTORIAL_STEPS.filter((step) =>
-        isUnlockStageAvailable(currentPeriod.unlockStage, step.unlockStage),
+      TUTORIAL_STEPS.filter(
+        (step) =>
+          step.firstAvailablePeriod <= state.periodIndex &&
+          !state.completedTutorialIds.includes(step.id),
       ),
-    [currentPeriod.unlockStage],
+    [state.completedTutorialIds, state.periodIndex],
   );
-  const activeTutorialStep = availableTutorialSteps[tutorialStepIndex];
+  const activeTutorialStep = pendingTutorialSteps[tutorialStepIndex];
+  const activeTutorialSequence = getTutorialSequenceProgress(
+    activeTutorialStep?.id,
+  );
   const displaySummary =
     showSummary || (state.phase === "finished" && !state.report);
 
   const restart = () => {
     setState(restartRun());
     setShowSummary(false);
-    setTutorialActive(true);
     setTutorialStepIndex(0);
     setSiteTouched(false);
     setActivePanel(null);
   };
 
-  const selectSite = (siteId: string) => {
+  const handleSelectSite = (siteId: string) => {
+    if (!selectableSites.some((site) => site.id === siteId)) return;
     setSiteTouched(true);
-    setState((current) => ({ ...current, selectedSiteId: siteId }));
+    setState((current) => selectGameSite(current, siteId));
     setActivePanel(null);
   };
 
@@ -1067,8 +1112,31 @@ function PlayPage() {
     (project) => project.selectedPeriodIndex === state.periodIndex,
   );
 
+  const completeActiveTutorial = () => {
+    if (!activeTutorialStep) return;
+    setState((current) => completeTutorialStep(current, activeTutorialStep.id));
+    setTutorialStepIndex(0);
+  };
+
   useEffect(() => {
-    if (!tutorialActive || !activeTutorialStep) return;
+    setTutorialStepIndex((current) =>
+      Math.min(current, Math.max(0, pendingTutorialSteps.length - 1)),
+    );
+  }, [pendingTutorialSteps.length]);
+
+  useEffect(() => {
+    if (
+      activeTutorialStep?.target.startsWith("action-") &&
+      state.phase === "planning" &&
+      activePanel !== "actions"
+    ) {
+      setActivePanel("actions");
+    }
+  }, [activePanel, activeTutorialStep, state.phase]);
+
+  useEffect(() => {
+    if (!activeTutorialStep) return;
+    const cardTutorialIds = CARD_TUTORIAL_ACTIONS[activeTutorialStep.id] ?? [];
 
     const completed =
       (activeTutorialStep.id === "market" && siteTouched) ||
@@ -1076,20 +1144,25 @@ function PlayPage() {
         state.projects.some(
           (project) => project.cardId === "hyperscale-campus",
         )) ||
+      (cardTutorialIds.length > 0 &&
+        state.projects.some((project) =>
+          cardTutorialIds.includes(project.cardId),
+        )) ||
       (activeTutorialStep.id === "run" && Boolean(state.report)) ||
       (activeTutorialStep.id === "report" && state.phase === "planning");
 
     if (completed) {
-      setTutorialStepIndex((current) => current + 1);
+      setState((current) =>
+        completeTutorialStep(current, activeTutorialStep.id),
+      );
+      setTutorialStepIndex(0);
     }
   }, [
     activeTutorialStep,
-    availableTutorialSteps.length,
     siteTouched,
     state.phase,
     state.projects,
     state.report,
-    tutorialActive,
   ]);
 
   return (
@@ -1218,7 +1291,7 @@ function PlayPage() {
           <div className="map-topline">
             <div>
               <p className="eyebrow">US atlas</p>
-              <h2>Starter slate: {selectableSites.length} markets</h2>
+              <h2>Available slate: {selectableSites.length} markets</h2>
             </div>
             <span>{builtSites.length} built</span>
           </div>
@@ -1226,7 +1299,8 @@ function PlayPage() {
             builtSiteIds={state.builtSiteIds}
             selectedSiteId={state.selectedSiteId}
             sites={selectableSites}
-            onSelectSite={selectSite}
+            campusMarkerSrc={generatedAssets.map.campusMarker}
+            onSelectSite={handleSelectSite}
           />
           <AdvisorPanel state={state} compact />
         </div>
@@ -1289,23 +1363,22 @@ function PlayPage() {
         </div>
       )}
       <TutorialOverlay
-        active={tutorialActive}
+        active={Boolean(activeTutorialStep)}
         step={activeTutorialStep}
-        stepIndex={tutorialStepIndex}
-        stepCount={availableTutorialSteps.length}
+        stepIndex={activeTutorialSequence.stepIndex}
+        stepCount={activeTutorialSequence.stepCount}
+        canBack={tutorialStepIndex > 0}
         onBack={() =>
           setTutorialStepIndex((current) => Math.max(0, current - 1))
         }
-        onNext={() => {
-          setTutorialStepIndex((current) => current + 1);
-        }}
-        onSkip={() => setTutorialActive(false)}
+        onNext={completeActiveTutorial}
+        onSkip={completeActiveTutorial}
       />
       {activePanel === "market" && (
         <CommandModal
           eyebrow="Market slate"
           title={
-            state.builtSiteIds.length === 0
+            selectableSites.length === INITIAL_SITE_IDS.length
               ? "Choose from 3 starter markets"
               : "Choose a regional market"
           }
@@ -1314,7 +1387,7 @@ function PlayPage() {
           <SitePanel
             state={state}
             sites={selectableSites}
-            onSelectSite={selectSite}
+            onSelectSite={handleSelectSite}
           />
         </CommandModal>
       )}
@@ -1338,7 +1411,7 @@ function PlayPage() {
 }
 
 function LeaderboardPage() {
-  const { entries, clearEntries } = useLeaderboard();
+  const { entries, loading, error } = useLeaderboard();
 
   return (
     <main className="leaderboard-page">
@@ -1352,40 +1425,44 @@ function LeaderboardPage() {
             <Play size={18} />
             Play again
           </Link>
-          <button className="ghost-button" type="button" onClick={clearEntries}>
-            Reset
-          </button>
         </div>
       </section>
 
       <section className="leaderboard-table" aria-label="Leaderboard entries">
-        {entries.map((entry, index) => (
-          <article key={entry.id} className="leaderboard-row">
-            <div className="rank-badge">{index + 1}</div>
-            <div className="leaderboard-main">
-              <h2>{entry.playerName}</h2>
-              <p>{entry.sites.join(" / ") || "No markets completed"}</p>
-            </div>
-            <div className="leaderboard-stats">
-              <span>
-                <strong>{entry.score}</strong>
-                score
-              </span>
-              <span>
-                <strong>{formatLargeNumber(entry.capacity)}</strong>
-                MW
-              </span>
-              <span>
-                <strong>{entry.demandCoverage}%</strong>
-                coverage
-              </span>
-              <span>
-                <strong>{formatBudget(entry.budgetRemaining)}</strong>
-                left
-              </span>
-            </div>
-          </article>
-        ))}
+        {loading && <p className="leaderboard-empty">Loading leaderboard.</p>}
+        {!loading && error && <p className="leaderboard-empty">{error}</p>}
+        {!loading && !error && entries.length === 0 && (
+          <p className="leaderboard-empty">No submitted scores yet.</p>
+        )}
+        {!loading &&
+          !error &&
+          entries.map((entry, index) => (
+            <article key={entry.id} className="leaderboard-row">
+              <div className="rank-badge">{index + 1}</div>
+              <div className="leaderboard-main">
+                <h2>{entry.playerName}</h2>
+                <p>{entry.sites.join(" / ") || "No markets completed"}</p>
+              </div>
+              <div className="leaderboard-stats">
+                <span>
+                  <strong>{entry.score}</strong>
+                  score
+                </span>
+                <span>
+                  <strong>{formatLargeNumber(entry.capacity)}</strong>
+                  MW
+                </span>
+                <span>
+                  <strong>{entry.demandCoverage}%</strong>
+                  coverage
+                </span>
+                <span>
+                  <strong>{formatBudget(entry.budgetRemaining)}</strong>
+                  left
+                </span>
+              </div>
+            </article>
+          ))}
       </section>
     </main>
   );

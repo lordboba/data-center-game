@@ -90,6 +90,19 @@ const objects = {
        <path d="M78 42h164" stroke="${palette.cyan}" stroke-width="3" stroke-dasharray="7 8"/>
      </g>`
   ),
+  "data-center-building.svg": frame(
+    96,
+    72,
+    `<rect width="96" height="72" rx="10" fill="none"/>
+     <g filter="url(#glow)" stroke-linejoin="round">
+       <path d="M14 57V27l22-10 21 10v30z" fill="#12243a" stroke="${palette.cyan}" stroke-width="3"/>
+       <path d="M43 57V20l22-9 23 9v37z" fill="#172721" stroke="${palette.mint}" stroke-width="3"/>
+       <path d="M23 34h20M23 44h20M53 31h25M53 43h25" stroke="${palette.white}" stroke-width="3" opacity="0.78"/>
+       <path d="M30 17V6M68 11V4M80 19V8" stroke="${palette.amber}" stroke-width="3" stroke-linecap="round"/>
+       <path d="M10 60h80" stroke="${palette.mint}" stroke-width="3" stroke-linecap="round"/>
+     </g>`,
+    { label: "Built data center map marker" }
+  ),
   "frontier-campus.svg": objectBase(
     "Frontier Campus",
     palette.cyan,

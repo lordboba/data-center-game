@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="72" viewBox="0 0 96 72" role="img" aria-label="Built data center map marker">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="panelGrad" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#172721" offset="0"/>
+      <stop stop-color="#08130f" offset="1"/>
+    </linearGradient>
+    <pattern id="grid" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#6d8478" stroke-width="0.45" opacity="0.25"/>
+    </pattern>
+  </defs>
+  <rect width="96" height="72" rx="10" fill="none"/>
+     <g filter="url(#glow)" stroke-linejoin="round">
+       <path d="M14 57V27l22-10 21 10v30z" fill="#12243a" stroke="#7bdff2" stroke-width="3"/>
+       <path d="M43 57V20l22-9 23 9v37z" fill="#172721" stroke="#7cf2b0" stroke-width="3"/>
+       <path d="M23 34h20M23 44h20M53 31h25M53 43h25" stroke="#f4fff9" stroke-width="3" opacity="0.78"/>
+       <path d="M30 17V6M68 11V4M80 19V8" stroke="#f7c873" stroke-width="3" stroke-linecap="round"/>
+       <path d="M10 60h80" stroke="#7cf2b0" stroke-width="3" stroke-linecap="round"/>
+     </g>
+</svg>

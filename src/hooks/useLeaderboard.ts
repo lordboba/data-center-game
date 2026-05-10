@@ -1,106 +1,146 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ScoreBreakdown } from "../lib/gameEngine";
+import {
+  LEADERBOARD_API_PATH,
+  LeaderboardCreateResponse,
+  LeaderboardEntry,
+  LeaderboardListResponse,
+  LeaderboardSubmission,
+  rankLeaderboardEntries,
+} from "../shared/leaderboard";
 
-const LEADERBOARD_KEY = "data-center-game-leaderboard-v1";
-
-export type LeaderboardEntry = {
-  id: string;
-  playerName: string;
-  score: number;
-  capacity: number;
-  demandCoverage: number;
-  budgetRemaining: number;
-  sites: string[];
-  createdAt: string;
-};
-
-const starterEntries: LeaderboardEntry[] = [
-  {
-    id: "seed-1",
-    playerName: "Grid Hawk",
-    score: 731,
-    capacity: 173,
-    demandCoverage: 96,
-    budgetRemaining: 21,
-    sites: ["Ashburn", "Chicago", "Dallas", "Hillsboro", "Columbus", "Quincy"],
-    createdAt: new Date("2026-05-01T12:00:00.000Z").toISOString(),
-  },
-  {
-    id: "seed-2",
-    playerName: "Cool Roof",
-    score: 704,
-    capacity: 165,
-    demandCoverage: 89,
-    budgetRemaining: 28,
-    sites: ["Des Moines", "Dallas", "Atlanta", "Quincy", "Raleigh", "Omaha"],
-    createdAt: new Date("2026-05-02T12:00:00.000Z").toISOString(),
-  },
-  {
-    id: "seed-3",
-    playerName: "Latency Desk",
-    score: 682,
-    capacity: 156,
-    demandCoverage: 92,
-    budgetRemaining: 16,
-    sites: ["Secaucus", "Ashburn", "Chicago", "Atlanta", "Dallas", "Omaha"],
-    createdAt: new Date("2026-05-03T12:00:00.000Z").toISOString(),
-  },
-];
-
-function readEntries(): LeaderboardEntry[] {
-  if (typeof window === "undefined") return starterEntries;
-
-  try {
-    const stored = window.localStorage.getItem(LEADERBOARD_KEY);
-    if (!stored) return starterEntries;
-    const parsed = JSON.parse(stored) as LeaderboardEntry[];
-    if (!Array.isArray(parsed)) return starterEntries;
-    return parsed;
-  } catch {
-    return starterEntries;
-  }
+function isLeaderboardEntry(value: unknown): value is LeaderboardEntry {
+  if (!value || typeof value !== "object") return false;
+  const entry = value as Record<string, unknown>;
+  return (
+    typeof entry.id === "string" &&
+    typeof entry.playerName === "string" &&
+    typeof entry.score === "number" &&
+    typeof entry.capacity === "number" &&
+    typeof entry.demandCoverage === "number" &&
+    typeof entry.budgetRemaining === "number" &&
+    Array.isArray(entry.sites) &&
+    entry.sites.every((site) => typeof site === "string") &&
+    typeof entry.createdAt === "string"
+  );
 }
 
-function rankEntries(entries: LeaderboardEntry[]): LeaderboardEntry[] {
-  return [...entries].sort((a, b) => b.score - a.score).slice(0, 12);
+function parseLeaderboardList(value: unknown): LeaderboardEntry[] {
+  if (!value || typeof value !== "object") return [];
+  const entries = (value as LeaderboardListResponse).entries;
+  if (!Array.isArray(entries)) return [];
+  return rankLeaderboardEntries(entries.filter(isLeaderboardEntry));
+}
+
+async function readErrorMessage(response: Response): Promise<string> {
+  try {
+    const value = (await response.json()) as { error?: unknown };
+    if (typeof value.error === "string" && value.error.trim()) {
+      return value.error;
+    }
+  } catch {
+    // The API should return JSON errors, but a generic message is clearer than
+    // exposing an HTML fallback body from local dev servers.
+  }
+
+  return "Leaderboard is unavailable.";
+}
+
+function buildSubmission(
+  playerName: string,
+  breakdown: ScoreBreakdown,
+  sites: string[],
+): LeaderboardSubmission {
+  return {
+    playerName,
+    score: breakdown.score,
+    capacity: breakdown.capacity,
+    demandCoverage: breakdown.demandCoverage,
+    budgetRemaining: breakdown.budgetRemaining,
+    sites,
+  };
 }
 
 export function useLeaderboard() {
-  const [entries, setEntries] = useState<LeaderboardEntry[]>(() => rankEntries(readEntries()));
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const refreshEntries = useCallback(async (signal?: AbortSignal) => {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await fetch(LEADERBOARD_API_PATH, {
+        headers: { accept: "application/json" },
+        signal,
+      });
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response));
+      }
+
+      const payload = (await response.json()) as LeaderboardListResponse;
+      setEntries(parseLeaderboardList(payload));
+    } catch (caught) {
+      if (caught instanceof DOMException && caught.name === "AbortError") {
+        return;
+      }
+      const message =
+        caught instanceof Error
+          ? caught.message
+          : "Leaderboard is unavailable.";
+      setEntries([]);
+      setError(message);
+    } finally {
+      if (!signal?.aborted) {
+        setLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(entries));
-  }, [entries]);
+    const controller = new AbortController();
+    void refreshEntries(controller.signal);
+    return () => controller.abort();
+  }, [refreshEntries]);
 
   const addEntry = useCallback(
-    (playerName: string, breakdown: ScoreBreakdown, sites: string[]) => {
-      const cleanName = playerName.trim() || "Operator";
-      const nextEntry: LeaderboardEntry = {
-        id: crypto.randomUUID(),
-        playerName: cleanName,
-        score: breakdown.score,
-        capacity: breakdown.capacity,
-        demandCoverage: breakdown.demandCoverage,
-        budgetRemaining: breakdown.budgetRemaining,
-        sites,
-        createdAt: new Date().toISOString(),
-      };
-      setEntries((current) => rankEntries([nextEntry, ...current]));
-      return nextEntry;
+    async (playerName: string, breakdown: ScoreBreakdown, sites: string[]) => {
+      const response = await fetch(LEADERBOARD_API_PATH, {
+        method: "POST",
+        headers: {
+          accept: "application/json",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify(buildSubmission(playerName, breakdown, sites)),
+      });
+
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response));
+      }
+
+      const payload = (await response.json()) as LeaderboardCreateResponse;
+      if (!isLeaderboardEntry(payload.entry)) {
+        throw new Error("Leaderboard returned an invalid saved score.");
+      }
+
+      const nextEntries = parseLeaderboardList(payload);
+      setEntries(nextEntries.length > 0 ? nextEntries : [payload.entry]);
+      setError(null);
+      return payload.entry;
     },
     [],
   );
 
-  const clearEntries = useCallback(() => {
-    setEntries(starterEntries);
-  }, []);
-
-  const bestScore = useMemo(() => entries[0]?.score ?? 0, [entries]);
+  const bestScore = useMemo(() => entries[0]?.score ?? null, [entries]);
 
   return {
     entries,
     addEntry,
-    clearEntries,
+    refreshEntries,
     bestScore,
+    loading,
+    error,
   };
 }

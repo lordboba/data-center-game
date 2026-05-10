@@ -26,11 +26,29 @@ export type CampaignPeriod = {
 
 export type TutorialStep = {
   id: string;
+  sequenceId: TutorialSequenceId;
   target: string;
-  unlockStage: UnlockStage;
+  firstAvailablePeriod: number;
   title: string;
   body: string;
   nextLabel: string;
+};
+
+export type TutorialSequenceId =
+  | "starter"
+  | "colocation"
+  | "campus-expansion"
+  | "infrastructure"
+  | "water-reuse"
+  | "dry-cooling"
+  | "public-support"
+  | "politics"
+  | "operations-cadence"
+  | "monthly-pressure";
+
+export type TutorialSequenceProgress = {
+  stepIndex: number;
+  stepCount: number;
 };
 
 export type ProgressionRule = {
@@ -182,77 +200,195 @@ export const PROGRESSION_RULES: ProgressionRule[] = [
 export const TUTORIAL_STEPS: TutorialStep[] = [
   {
     id: "market",
+    sequenceId: "starter",
     target: "market-map",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Choose the first market",
     body: "Your first job is siting. Pick a market before buying capacity; regional cards use the selected market.",
     nextLabel: "Next",
   },
   {
     id: "campus",
+    sequenceId: "starter",
     target: "open-actions",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Fund the first campus",
     body: "Open the action panel. Early 2022 only asks you to farm the core resource: compute capacity, so start with one hyperscale campus.",
     nextLabel: "Next",
   },
   {
     id: "budget",
+    sequenceId: "starter",
     target: "metric-budget",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Watch budget",
     body: "Every period has a smaller budget slice. Strong outlook adds room next turn; weak management raises prices.",
     nextLabel: "Next",
   },
   {
     id: "compute",
+    sequenceId: "starter",
     target: "metric-compute",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Track compute",
     body: "Compute coverage is the first demand statistic. Falling behind makes later capacity more expensive.",
     nextLabel: "Next",
   },
   {
     id: "run",
+    sequenceId: "starter",
     target: "run-plan",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Advance the turn",
     body: "Run the plan to complete ready projects, read the report, and move to the next period.",
     nextLabel: "Next",
   },
   {
     id: "report",
+    sequenceId: "starter",
     target: "turn-report",
-    unlockStage: "siting",
+    firstAvailablePeriod: 0,
     title: "Read the report",
     body: "Reports explain what improved, what slipped, and which bottleneck should guide the next purchase.",
     nextLabel: "Next",
   },
   {
+    id: "colocation",
+    sequenceId: "colocation",
+    target: "action-lease-colocation",
+    firstAvailablePeriod: 1,
+    title: "Lease colocation",
+    body: "Colocation is instant national capacity. It helps cover a near-term compute gap, but it consumes power and cooling headroom without creating a durable market footprint.",
+    nextLabel: "Got it",
+  },
+  {
+    id: "campus-expansion",
+    sequenceId: "campus-expansion",
+    target: "action-expand-campus",
+    firstAvailablePeriod: 2,
+    title: "Expand an existing campus",
+    body: "Expansion is cheaper and faster than a new campus, but only works in a market where a hyperscale campus has already come online.",
+    nextLabel: "Got it",
+  },
+  {
     id: "infrastructure",
+    sequenceId: "infrastructure",
     target: "metric-power",
-    unlockStage: "infrastructure",
+    firstAvailablePeriod: 4,
     title: "Power unlocks the next layer",
-    body: "From 2023, compute is not enough. Power, cooling, and water all shape whether expansion can keep going.",
+    body: "From 2023, compute is not enough. Power coverage starts affecting cost and can block compute expansion if it falls too low.",
     nextLabel: "Next",
   },
   {
+    id: "power-projects",
+    sequenceId: "infrastructure",
+    target: "action-renewables-ppa",
+    firstAvailablePeriod: 4,
+    title: "Choose power strategy",
+    body: "PPAs improve cleaner supply and support. Gas is faster but dirtier. Grid interconnects improve deliverable power without adding compute by themselves.",
+    nextLabel: "Got it",
+  },
+  {
+    id: "water-reuse",
+    sequenceId: "water-reuse",
+    target: "action-water-recycling",
+    firstAvailablePeriod: 6,
+    title: "Protect water resilience",
+    body: "Water recycling does not add compute, but it protects local legitimacy and reduces the risk that future permits become fragile.",
+    nextLabel: "Got it",
+  },
+  {
+    id: "dry-cooling",
+    sequenceId: "dry-cooling",
+    target: "action-dry-cooling",
+    firstAvailablePeriod: 7,
+    title: "Manage cooling separately",
+    body: "Dry cooling adds thermal capacity and reduces water pressure, but it consumes extra power headroom.",
+    nextLabel: "Got it",
+  },
+  {
     id: "support",
+    sequenceId: "public-support",
     target: "metric-support",
-    unlockStage: "public",
+    firstAvailablePeriod: 8,
     title: "Public support matters",
     body: "In 2024, communities notice the buildout. If support drops too low, projects get costly and fragile.",
     nextLabel: "Next",
   },
   {
+    id: "community-benefits",
+    sequenceId: "public-support",
+    target: "action-community-benefits",
+    firstAvailablePeriod: 8,
+    title: "Buy legitimacy before it breaks",
+    body: "Community benefits consume budget without adding capacity, but they can keep site-required work from being blocked by public opposition.",
+    nextLabel: "Got it",
+  },
+  {
     id: "politics",
+    sequenceId: "politics",
     target: "metric-politics",
-    unlockStage: "politics",
+    firstAvailablePeriod: 12,
     title: "Politics arrives later",
     body: "By 2025, policy and permitting become explicit. Support can now block expansion if ignored.",
+    nextLabel: "Next",
+  },
+  {
+    id: "permitting",
+    sequenceId: "politics",
+    target: "action-fast-track-permitting",
+    firstAvailablePeriod: 12,
+    title: "Permitting trades speed for backlash",
+    body: "Fast-track permitting boosts political and regulator support, but rushed approvals can damage public and environmental support.",
+    nextLabel: "Got it",
+  },
+  {
+    id: "operations-cadence",
+    sequenceId: "operations-cadence",
+    target: "metric-year",
+    firstAvailablePeriod: 16,
+    title: "The campaign speeds up",
+    body: "From 2026, turns run every two months. Queued projects still complete by period, so timing matters more than annual planning.",
+    nextLabel: "Got it",
+  },
+  {
+    id: "monthly-pressure",
+    sequenceId: "monthly-pressure",
+    target: "run-plan",
+    firstAvailablePeriod: 40,
+    title: "Final monthly pressure",
+    body: "In 2030, every month checks the final demand curve. The win condition now depends on capacity, support, and the score threshold holding together.",
     nextLabel: "Done",
   },
 ];
+
+export function getTutorialSequenceProgress(
+  tutorialId: string | undefined,
+): TutorialSequenceProgress {
+  if (!tutorialId) {
+    return { stepIndex: 0, stepCount: 0 };
+  }
+
+  const activeStep = TUTORIAL_STEPS.find((step) => step.id === tutorialId);
+  if (!activeStep) {
+    throw new Error(`Unknown tutorial step id: ${tutorialId}`);
+  }
+
+  const sequenceSteps = TUTORIAL_STEPS.filter(
+    (step) => step.sequenceId === activeStep.sequenceId,
+  );
+  const stepIndex = sequenceSteps.findIndex((step) => step.id === tutorialId);
+  if (stepIndex === -1) {
+    throw new Error(
+      `Tutorial step ${tutorialId} is missing from its sequence.`,
+    );
+  }
+
+  return {
+    stepIndex,
+    stepCount: sequenceSteps.length,
+  };
+}
 
 export type GameModeId = "monthly" | "quarterly";
 
@@ -299,6 +435,7 @@ export type DataCenterSite = {
   state: string;
   stateFips: string;
   region: Region;
+  firstAvailablePeriod: number;
   latitude: number;
   longitude: number;
   capex: number;
@@ -318,6 +455,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Virginia",
     stateFips: "51",
     region: "East",
+    firstAvailablePeriod: 0,
     latitude: 39.0437,
     longitude: -77.4875,
     capex: 24,
@@ -335,6 +473,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Texas",
     stateFips: "48",
     region: "South",
+    firstAvailablePeriod: 0,
     latitude: 32.7767,
     longitude: -96.797,
     capex: 18,
@@ -352,6 +491,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Oregon",
     stateFips: "41",
     region: "West",
+    firstAvailablePeriod: 0,
     latitude: 45.5229,
     longitude: -122.9898,
     capex: 17,
@@ -369,6 +509,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Illinois",
     stateFips: "17",
     region: "Midwest",
+    firstAvailablePeriod: 1,
     latitude: 41.8781,
     longitude: -87.6298,
     capex: 19,
@@ -386,6 +527,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Arizona",
     stateFips: "04",
     region: "Mountain",
+    firstAvailablePeriod: 2,
     latitude: 33.4484,
     longitude: -112.074,
     capex: 15,
@@ -403,6 +545,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Georgia",
     stateFips: "13",
     region: "South",
+    firstAvailablePeriod: 3,
     latitude: 33.749,
     longitude: -84.388,
     capex: 16,
@@ -420,6 +563,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Ohio",
     stateFips: "39",
     region: "Midwest",
+    firstAvailablePeriod: 4,
     latitude: 39.9612,
     longitude: -82.9988,
     capex: 14,
@@ -437,6 +581,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Iowa",
     stateFips: "19",
     region: "Midwest",
+    firstAvailablePeriod: 5,
     latitude: 41.5868,
     longitude: -93.625,
     capex: 13,
@@ -454,6 +599,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "New Jersey",
     stateFips: "34",
     region: "East",
+    firstAvailablePeriod: 6,
     latitude: 40.7895,
     longitude: -74.0565,
     capex: 23,
@@ -471,6 +617,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Nevada",
     stateFips: "32",
     region: "West",
+    firstAvailablePeriod: 8,
     latitude: 39.5296,
     longitude: -119.8138,
     capex: 14,
@@ -488,6 +635,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Utah",
     stateFips: "49",
     region: "Mountain",
+    firstAvailablePeriod: 9,
     latitude: 40.7608,
     longitude: -111.891,
     capex: 15,
@@ -505,6 +653,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "North Carolina",
     stateFips: "37",
     region: "South",
+    firstAvailablePeriod: 10,
     latitude: 35.7796,
     longitude: -78.6382,
     capex: 15,
@@ -522,6 +671,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Washington",
     stateFips: "53",
     region: "West",
+    firstAvailablePeriod: 12,
     latitude: 47.2343,
     longitude: -119.8526,
     capex: 16,
@@ -539,6 +689,7 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
     state: "Nebraska",
     stateFips: "31",
     region: "Midwest",
+    firstAvailablePeriod: 14,
     latitude: 41.2565,
     longitude: -95.9345,
     capex: 12,
@@ -552,11 +703,17 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
   },
 ];
 
-export const INITIAL_SITE_IDS = [
-  "ashburn-va",
-  "dallas-tx",
-  "hillsboro-or",
-] as const;
+export const INITIAL_SITE_IDS = DATA_CENTER_SITES.filter(
+  (site) => site.firstAvailablePeriod === 0,
+).map((site) => site.id);
+
+export const METRIC_FIRST_AVAILABLE_PERIODS = {
+  power: 4,
+  water: 6,
+  cooling: 7,
+  peopleSupport: 8,
+  politicalSupport: 12,
+} as const;
 
 export const REGION_TARGETS: Record<Region, number> = {
   East: 30,
@@ -589,6 +746,8 @@ export type ActionEffects = {
   emissionsIndex?: number;
 };
 
+export type SiteRequirement = "none" | "available-site" | "built-site";
+
 export type ActionCard = {
   id: string;
   title: string;
@@ -596,8 +755,9 @@ export type ActionCard = {
   category: ActionCategory;
   cost: number;
   unlockStage: UnlockStage;
+  firstAvailablePeriod: number;
   durationMonths: number;
-  requiresSite: boolean;
+  siteRequirement: SiteRequirement;
   effects: ActionEffects;
   benefitText: string;
   riskText: string;
@@ -636,8 +796,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "compute",
     cost: 5,
     unlockStage: "siting",
+    firstAvailablePeriod: 0,
     durationMonths: 0,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       computeH100e: 4_800_000,
       coolingMW: 900,
@@ -658,8 +819,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "compute",
     cost: 3,
     unlockStage: "compute",
+    firstAvailablePeriod: 2,
     durationMonths: 3,
-    requiresSite: true,
+    siteRequirement: "built-site",
     effects: {
       computeH100e: 2_200_000,
       coolingMW: 420,
@@ -679,8 +841,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "compute",
     cost: 2,
     unlockStage: "compute",
+    firstAvailablePeriod: 1,
     durationMonths: 0,
-    requiresSite: false,
+    siteRequirement: "none",
     effects: {
       computeH100e: 700_000,
       powerMW: -80,
@@ -699,8 +862,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "power",
     cost: 4,
     unlockStage: "infrastructure",
+    firstAvailablePeriod: 5,
     durationMonths: 4,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       powerMW: 8_500,
       politicalSupport: 2,
@@ -719,8 +883,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "power",
     cost: 3,
     unlockStage: "infrastructure",
+    firstAvailablePeriod: 4,
     durationMonths: 4,
-    requiresSite: false,
+    siteRequirement: "none",
     effects: {
       powerMW: 4_800,
       environmentalSupport: 5,
@@ -738,8 +903,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "power",
     cost: 4,
     unlockStage: "infrastructure",
+    firstAvailablePeriod: 5,
     durationMonths: 4,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       powerMW: 6_200,
       regulatorSupport: 3,
@@ -756,8 +922,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "water",
     cost: 3,
     unlockStage: "infrastructure",
+    firstAvailablePeriod: 6,
     durationMonths: 0,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       waterMLDay: 1_900,
       peopleSupport: 2,
@@ -776,8 +943,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "cooling",
     cost: 3,
     unlockStage: "infrastructure",
+    firstAvailablePeriod: 7,
     durationMonths: 0,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       coolingMW: 3_600,
       waterMLDay: 900,
@@ -795,8 +963,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "politics",
     cost: 2,
     unlockStage: "public",
+    firstAvailablePeriod: 8,
     durationMonths: 0,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       peopleSupport: 8,
       laborSupport: 4,
@@ -813,8 +982,9 @@ export const ACTION_CARDS: ActionCard[] = [
     category: "permitting",
     cost: 2,
     unlockStage: "politics",
+    firstAvailablePeriod: 12,
     durationMonths: 0,
-    requiresSite: true,
+    siteRequirement: "available-site",
     effects: {
       politicalSupport: 5,
       regulatorSupport: 4,

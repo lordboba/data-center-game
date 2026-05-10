@@ -76,6 +76,7 @@ type UnitedStatesMapProps = {
   onSelectSite?: (siteId: string) => void;
   compact?: boolean;
   sites?: DataCenterSite[];
+  campusMarkerSrc?: string;
 };
 
 function stateFips(id: unknown): string {
@@ -88,6 +89,7 @@ export function UnitedStatesMap({
   onSelectSite,
   compact = false,
   sites = DATA_CENTER_SITES,
+  campusMarkerSrc = "/generated-assets/objects/data-center-building.svg",
 }: UnitedStatesMapProps) {
   const states = useMemo(() => {
     const topology = statesAtlas as unknown as {
@@ -188,6 +190,18 @@ export function UnitedStatesMap({
               onClick={() => onSelectSite?.(site.id)}
               onKeyDown={(event) => handleKeyDown(event, site)}
             >
+              {isBuilt && (
+                <image
+                  className="site-marker__building"
+                  href={campusMarkerSrc}
+                  x="-10"
+                  y="-27"
+                  width="20"
+                  height="18"
+                  preserveAspectRatio="xMidYMid meet"
+                  aria-hidden="true"
+                />
+              )}
               <circle className="site-marker__halo" r={isSelected ? 16 : 11} />
               <circle className="site-marker__core" r={isBuilt ? 6.5 : 5.5} />
               {(isSelected || isBuilt || (!compact && !onSelectSite)) && (

@@ -1218,6 +1218,11 @@ h1 {
   fill: var(--green);
 }
 
+.site-marker__building {
+  pointer-events: none;
+  filter: drop-shadow(0 3px 5px rgba(8, 19, 15, 0.42));
+}
+
 .site-marker__label {
   paint-order: stroke;
   stroke: rgba(8, 19, 15, 0.92);
@@ -1535,9 +1540,23 @@ h1 {
   text-transform: none;
 }
 
+.form-error {
+  margin: 10px 0 0;
+  color: #ffb9a8;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .leaderboard-table {
   display: grid;
   gap: 10px;
+}
+
+.leaderboard-empty {
+  border: 1px solid var(--line-soft);
+  padding: 18px;
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .leaderboard-row {

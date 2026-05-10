@@ -8,7 +8,7 @@ export default [
     ignores: ["dist", "node_modules"],
   },
   {
-    files: ["src/**/*.{ts,tsx}", "vite.config.ts"],
+    files: ["src/**/*.{ts,tsx}", "api/**/*.ts", "vite.config.ts"],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -25,7 +25,10 @@ export default [
     rules: {
       ...tsPlugin.configs.recommended.rules,
       ...reactHooks.configs.recommended.rules,
-      "react-refresh/only-export-components": ["warn", { allowConstantExport: true }],
+      "react-refresh/only-export-components": [
+        "warn",
+        { allowConstantExport: true },
+      ],
     },
   },
 ];

@@ -16,19 +16,22 @@ This produces 52 campaign turns. `year` remains on game state as a derived compa
 
 ## Unlock Ramp
 
-- `siting`: 2022 Q1. Show market selection and Build Hyperscale Campus only.
-- `compute`: later 2022. Add compute coverage, period budget, colocation, and campus expansion.
-- `infrastructure`: 2023. Reveal power, cooling, water, and the basic infrastructure cards.
-- `public`: 2024. Reveal people support and community mitigation.
-- `politics`: 2025. Reveal political support and permitting.
-- `operations`: 2026-2029. Use two-month turns and all major systems.
-- `monthly`: 2030. Use monthly turns against final demand pressure.
+- `Q1 2022`: three starter markets only: Ashburn, Dallas, and Hillsboro. Show market selection, period budget, compute, outlook, and Build Hyperscale Campus.
+- `Q2 2022`: add Lease Colocation Capacity and Chicago.
+- `Q3 2022`: add Expand Existing Campus and Phoenix. Expansion requires the selected market to already have a completed hyperscale campus.
+- `Q4 2022`: add Atlanta.
+- `2023`: infrastructure arrives in waves. Q1 adds power coverage and renewables PPAs. Q2 adds gas and grid interconnects. Q3 adds water recycling. Q4 adds dry cooling. Columbus, Des Moines, and Secaucus unlock through the year.
+- `2024`: people support becomes visible, Community Benefits Package unlocks, and Reno, Salt Lake City, and Raleigh become available through the year.
+- `2025`: political support and Fast-Track Permitting unlock. Quincy and Omaha finish the pre-full-game site ramp.
+- `Jan-Feb 2026`: all current markets and action cards are available, and the game shifts to two-month operating turns.
+- `2030`: monthly turns run against the final demand pressure.
 
 Political support is tracked internally before 2025, but it should not be a visible planning surface or independent fail condition until the politics stage.
+Power, water, and cooling are also tracked internally before their tutorials arrive, but they only become visible planning surfaces when their period-level feature unlocks.
 
 ## Tutorial Behavior
 
-Tutorial steps live in `TUTORIAL_STEPS`. Each step has a target matching a `data-tutorial` anchor in the UI. The active tutorial layer draws a boxed highlight around the target and places a small explanation panel near it.
+Tutorial steps live in `TUTORIAL_STEPS`. Each step has a target matching a `data-tutorial` anchor in the UI and a `sequenceId` that defines its local counter group. The active tutorial layer draws a boxed highlight around the target and places a small explanation panel near it.
 
 Required anchors:
 
@@ -42,7 +45,17 @@ Required anchors:
 - `metric-support`
 - `metric-politics`
 
-The tutorial can be advanced manually with `Next`, `Back`, and `Skip`. It also advances when the player completes core actions: selecting a market, buying the first campus, running a plan, and continuing after a report.
+The tutorial can be advanced manually with `Next`, `Back`, and `Skip`. The overlay counter is sequence-local, so the starter tutorial displays 1/6 through 6/6 and later feature tutorials reset to their own counts. Each tutorial id is recorded in `completedTutorialIds` when it is completed or dismissed, so feature tips do not repeat every turn. Core tutorials also complete automatically when the player selects a market, buys the first campus, runs a plan, and continues after a report.
+
+Mini tutorials appear at the same period as their feature:
+
+- `Q2 2022`: colocation.
+- `Q3 2022`: campus expansion and the built-campus requirement.
+- `2023`: power, power-project tradeoffs, water recycling, and dry cooling.
+- `2024`: public support and community benefits.
+- `2025`: politics and fast-track permitting.
+- `Jan-Feb 2026`: faster two-month cadence and queued project timing.
+- `Jan 2030`: final monthly pressure.
 
 ## Dynamic Budget and Cost Pressure
 
@@ -60,14 +73,18 @@ Blocking rules:
 
 - After public support is visible, site-required expansion can be blocked when people support falls below 25.
 - After political support is visible, site-required expansion can be blocked when political support falls below 25.
-- After infrastructure unlocks, compute expansion can be blocked when power coverage falls below 25.
+- After power coverage is visible, compute expansion can be blocked when power coverage falls below 25.
+- `Expand Existing Campus` requires the selected market to have a completed hyperscale campus.
 
 ## Verification Scenarios
 
 - New run starts at `Q1 2022` with only market selection and Build Hyperscale Campus available.
 - The tutorial highlights market selection, the first campus card, budget, compute, the run button, and the report.
-- 2023 reveals power, cooling, and water cards without political cards.
+- Colocation appears in `Q2 2022`; campus expansion appears in `Q3 2022` but is disabled for unbuilt markets.
+- 2023 reveals infrastructure in waves without political cards.
 - 2025 reveals political support and permitting.
+- The market list grows by explicit period and never jumps from three markets to all markets after the first build.
+- Built campuses appear as small data-center SVG markers on the map.
 - Balanced play improves outlook and makes budget/prices easier.
 - Neglected compute, power, water, people support, or political support raises costs and can block expansion.
 - The campaign labels advance quarterly, then bimonthly, then monthly.

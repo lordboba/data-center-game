@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-10T05:33:33.273Z",
+  "generatedAt": "2026-05-10T07:57:31.682Z",
   "visualSystem": {
     "font": "'Geist Mono', 'SFMono-Regular', 'Menlo', monospace",
     "palette": {
@@ -22,6 +22,7 @@
   },
   "objects": {
     "gpu-pod": "/generated-assets/objects/gpu-pod.svg",
+    "data-center-building": "/generated-assets/objects/data-center-building.svg",
     "frontier-campus": "/generated-assets/objects/frontier-campus.svg",
     "grid-interconnect": "/generated-assets/objects/grid-interconnect.svg",
     "renewable-ppa": "/generated-assets/objects/renewable-ppa.svg",
