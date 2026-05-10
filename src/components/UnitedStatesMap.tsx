@@ -75,6 +75,7 @@ type UnitedStatesMapProps = {
   selectedSiteId?: string;
   onSelectSite?: (siteId: string) => void;
   compact?: boolean;
+  sites?: DataCenterSite[];
 };
 
 function stateFips(id: unknown): string {
@@ -86,6 +87,7 @@ export function UnitedStatesMap({
   selectedSiteId,
   onSelectSite,
   compact = false,
+  sites = DATA_CENTER_SITES,
 }: UnitedStatesMapProps) {
   const states = useMemo(() => {
     const topology = statesAtlas as unknown as {
@@ -105,12 +107,17 @@ export function UnitedStatesMap({
   const builtSet = useMemo(() => new Set(builtSiteIds), [builtSiteIds]);
   const builtStates = useMemo(() => {
     return new Set(
-      DATA_CENTER_SITES.filter((site) => builtSet.has(site.id)).map((site) => site.stateFips),
+      DATA_CENTER_SITES.filter((site) => builtSet.has(site.id)).map(
+        (site) => site.stateFips,
+      ),
     );
   }, [builtSet]);
-  const selectedSite = DATA_CENTER_SITES.find((site) => site.id === selectedSiteId);
+  const selectedSite = sites.find((site) => site.id === selectedSiteId);
 
-  const handleKeyDown = (event: KeyboardEvent<SVGGElement>, site: DataCenterSite) => {
+  const handleKeyDown = (
+    event: KeyboardEvent<SVGGElement>,
+    site: DataCenterSite,
+  ) => {
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
       onSelectSite?.(site.id);
@@ -126,7 +133,13 @@ export function UnitedStatesMap({
     >
       <defs>
         <filter id="map-shadow" x="-20%" y="-20%" width="140%" height="140%">
-          <feDropShadow dx="0" dy="18" stdDeviation="14" floodColor="#10211d" floodOpacity="0.14" />
+          <feDropShadow
+            dx="0"
+            dy="18"
+            stdDeviation="14"
+            floodColor="#10211d"
+            floodOpacity="0.14"
+          />
         </filter>
       </defs>
       <g filter="url(#map-shadow)">
@@ -152,7 +165,7 @@ export function UnitedStatesMap({
         })}
       </g>
       <g className="site-layer">
-        {DATA_CENTER_SITES.map((site) => {
+        {sites.map((site) => {
           const point = projection([site.longitude, site.latitude]);
           if (!point) return null;
           const [x, y] = point;

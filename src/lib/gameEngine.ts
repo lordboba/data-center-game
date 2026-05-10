@@ -3,6 +3,7 @@ import {
   ANNUAL_BUDGETS,
   ActionCard,
   ActionEffects,
+  CAMPAIGN_PERIODS,
   DATA_CENTER_SITES,
   DataCenterSite,
   DEMAND_CURVE,
@@ -10,11 +11,14 @@ import {
   GameMode,
   GameModeId,
   GAME_MODES,
+  INITIAL_SITE_IDS,
   MIN_DEMAND_TO_WIN,
   REGION_TARGETS,
   STARTING_BUDGET,
   START_YEAR,
+  UNLOCK_STAGE_ORDER,
   WIN_SCORE,
+  UnlockStage,
 } from "../data/gameData";
 
 export type GamePhase = "planning" | "report" | "finished";
@@ -40,12 +44,15 @@ export type PlannedAction = {
   id: string;
   cardId: string;
   siteId: string | null;
-  selectedYear: number;
-  readyYear: number;
+  selectedPeriodIndex: number;
+  readyPeriodIndex: number;
+  cost: number;
 };
 
 export type TurnReport = {
+  periodIndex: number;
   year: number;
+  periodLabel: string;
   summary: string;
   completedProjects: string[];
   headlines: string[];
@@ -58,10 +65,12 @@ export type TurnReport = {
     waterCoverage: number;
     peopleSupport: number;
     politicalSupport: number;
+    outlook: number;
   };
 };
 
 export type GameState = {
+  periodIndex: number;
   year: number;
   phase: GamePhase;
   outcome: GameOutcomeStatus;
@@ -74,6 +83,8 @@ export type GameState = {
   infrastructure: InfrastructureState;
   emissionsIndex: number;
   missedPeriods: number;
+  outlook: number;
+  budgetBalance: number;
 };
 
 export type ScoreBreakdown = {
@@ -115,6 +126,7 @@ export type RunOutcome = {
 };
 
 export const initialGameState: GameState = {
+  periodIndex: 0,
   year: START_YEAR,
   phase: "planning",
   outcome: "active",
@@ -139,6 +151,8 @@ export const initialGameState: GameState = {
   },
   emissionsIndex: 35,
   missedPeriods: 0,
+  outlook: 62,
+  budgetBalance: 0,
 };
 
 const MONTH_LABELS = [
@@ -162,6 +176,55 @@ function clamp(value: number, min = 0, max = 100): number {
 
 function projectId(): string {
   return `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function stageRank(stage: UnlockStage): number {
+  return UNLOCK_STAGE_ORDER.indexOf(stage);
+}
+
+function hasUnlockStage(state: GameState, stage: UnlockStage): boolean {
+  return stageRank(getCurrentPeriod(state).unlockStage) >= stageRank(stage);
+}
+
+function absoluteMonth(year: number, month: number): number {
+  return (year - START_YEAR) * 12 + month;
+}
+
+function periodEndMonth(periodIndex: number): number {
+  const period = CAMPAIGN_PERIODS[periodIndex] ?? CAMPAIGN_PERIODS[0];
+  return absoluteMonth(period.year, period.endMonth);
+}
+
+function getReadyPeriodIndex(
+  selectedPeriodIndex: number,
+  durationMonths: number,
+): number {
+  if (durationMonths <= 0) return selectedPeriodIndex;
+
+  const readyMonth = periodEndMonth(selectedPeriodIndex) + durationMonths;
+  const readyPeriod =
+    CAMPAIGN_PERIODS.find(
+      (period) => absoluteMonth(period.year, period.endMonth) >= readyMonth,
+    ) ?? CAMPAIGN_PERIODS[CAMPAIGN_PERIODS.length - 1];
+  return readyPeriod.index;
+}
+
+export function getCurrentPeriod(state: Pick<GameState, "periodIndex">) {
+  return (
+    CAMPAIGN_PERIODS[state.periodIndex] ??
+    CAMPAIGN_PERIODS[CAMPAIGN_PERIODS.length - 1]
+  );
+}
+
+export function getPeriodLabel(state: Pick<GameState, "periodIndex">): string {
+  return getCurrentPeriod(state).label;
+}
+
+export function isUnlockStageAvailable(
+  currentStage: UnlockStage,
+  requiredStage: UnlockStage,
+): boolean {
+  return stageRank(currentStage) >= stageRank(requiredStage);
 }
 
 export function getGameMode(modeId: GameModeId): GameMode {
@@ -188,6 +251,15 @@ export function getBuiltSites(state: GameState): DataCenterSite[] {
   return state.builtSiteIds.map(findSite);
 }
 
+export function getSelectableSites(state: GameState): DataCenterSite[] {
+  if (state.builtSiteIds.length === 0) {
+    const starterIds = new Set<string>(INITIAL_SITE_IDS);
+    return DATA_CENTER_SITES.filter((site) => starterIds.has(site.id));
+  }
+
+  return DATA_CENTER_SITES;
+}
+
 export function getDemand(year: number) {
   const demand =
     DEMAND_CURVE.find((row) => row.year === year) ??
@@ -198,6 +270,29 @@ export function getDemand(year: number) {
     powerMW: demand.powerMW,
     coolingMW: Math.round(demand.powerMW * 0.3),
     waterMLDay: Math.round(demand.powerMW * 0.08),
+  };
+}
+
+export function getPeriodDemand(state: Pick<GameState, "periodIndex">) {
+  const period = getCurrentPeriod(state);
+  const current =
+    DEMAND_CURVE.find((row) => row.year === period.year) ??
+    DEMAND_CURVE[DEMAND_CURVE.length - 1];
+  const next =
+    DEMAND_CURVE.find((row) => row.year === period.year + 1) ?? current;
+  const fraction = Math.min(1, Math.max(0, (period.endMonth - 1) / 12));
+  const h100e = Math.round(
+    current.h100e + (next.h100e - current.h100e) * fraction,
+  );
+  const powerMW = Math.round(
+    current.powerMW + (next.powerMW - current.powerMW) * fraction,
+  );
+
+  return {
+    h100e,
+    powerMW,
+    coolingMW: Math.round(powerMW * 0.3),
+    waterMLDay: Math.round(powerMW * 0.08),
   };
 }
 
@@ -227,9 +322,10 @@ export function calculatePoliticalSupport(support: SupportState): number {
 
 export function getSupplySummary(
   state: GameState,
-  year = state.year,
+  year?: number,
 ): SupplySummary {
-  const demand = getDemand(year);
+  const demand =
+    typeof year === "number" ? getDemand(year) : getPeriodDemand(state);
   const computeCoverage = clamp(
     (state.infrastructure.computeH100e / demand.h100e) * 100,
   );
@@ -244,14 +340,22 @@ export function getSupplySummary(
   );
   const peopleSupport = calculatePeopleSupport(state.support);
   const politicalSupport = calculatePoliticalSupport(state.support);
-  const bottlenecks = [
-    { label: "Compute", value: computeCoverage },
-    { label: "Power", value: powerCoverage },
-    { label: "Cooling", value: coolingCoverage },
-    { label: "Water", value: waterCoverage },
-    { label: "People support", value: peopleSupport },
-    { label: "Political support", value: politicalSupport },
-  ].sort((a, b) => a.value - b.value);
+  const bottlenecks = [{ label: "Compute", value: computeCoverage }];
+
+  if (hasUnlockStage(state, "infrastructure")) {
+    bottlenecks.push(
+      { label: "Power", value: powerCoverage },
+      { label: "Cooling", value: coolingCoverage },
+      { label: "Water", value: waterCoverage },
+    );
+  }
+  if (hasUnlockStage(state, "public")) {
+    bottlenecks.push({ label: "People support", value: peopleSupport });
+  }
+  if (hasUnlockStage(state, "politics")) {
+    bottlenecks.push({ label: "Political support", value: politicalSupport });
+  }
+  bottlenecks.sort((a, b) => a.value - b.value);
 
   return {
     demand,
@@ -265,30 +369,130 @@ export function getSupplySummary(
   };
 }
 
-export function getAnnualBudget(year: number): number {
-  return ANNUAL_BUDGETS[year] ?? ANNUAL_BUDGETS[END_YEAR];
+export function getAnnualBudget(stateOrYear: GameState | number): number {
+  if (typeof stateOrYear === "number") {
+    return ANNUAL_BUDGETS[stateOrYear] ?? ANNUAL_BUDGETS[END_YEAR];
+  }
+
+  const period = getCurrentPeriod(stateOrYear);
+  const base = ANNUAL_BUDGETS[period.year] ?? ANNUAL_BUDGETS[END_YEAR];
+  return Math.max(2, base + stateOrYear.budgetBalance);
 }
 
 export function getPlannedCost(state: GameState): number {
   return state.projects
-    .filter((project) => project.selectedYear === state.year)
-    .reduce((sum, project) => sum + findAction(project.cardId).cost, 0);
+    .filter((project) => project.selectedPeriodIndex === state.periodIndex)
+    .reduce((sum, project) => sum + project.cost, 0);
 }
 
 export function getBudgetRemaining(state: GameState): number {
-  return getAnnualBudget(state.year) - getPlannedCost(state);
+  return getAnnualBudget(state) - getPlannedCost(state);
+}
+
+function getCostPressureValue(state: GameState, card: ActionCard): number {
+  const supply = getSupplySummary(state);
+
+  if (card.category === "compute") return supply.computeCoverage;
+  if (card.category === "power") return supply.powerCoverage;
+  if (card.category === "cooling") return supply.coolingCoverage;
+  if (card.category === "water") return supply.waterCoverage;
+  if (card.category === "permitting") return supply.politicalSupport;
+  if (card.category === "politics") return supply.peopleSupport;
+  return Math.round(
+    (supply.computeCoverage +
+      supply.powerCoverage +
+      supply.coolingCoverage +
+      supply.waterCoverage) /
+      4,
+  );
+}
+
+export function getDynamicActionCost(
+  state: GameState,
+  card: ActionCard,
+): number {
+  const pressure = getCostPressureValue(state, card);
+  let cost = card.cost;
+
+  if (pressure >= 85) cost -= 1;
+  if (pressure < 60) cost += 1;
+  if (pressure < 35) cost += 1;
+  if (state.outlook >= 78) cost -= 1;
+  if (state.outlook < 45) cost += 1;
+
+  return Math.max(1, cost);
+}
+
+export function getActionLockReason(
+  state: GameState,
+  card: ActionCard,
+): string | null {
+  const period = getCurrentPeriod(state);
+  if (!isUnlockStageAvailable(period.unlockStage, card.unlockStage)) {
+    return `Unlocks with ${card.unlockStage}`;
+  }
+  if (state.selectedActionIds.includes(card.id)) return "Already selected";
+
+  const supply = getSupplySummary(state);
+  if (
+    card.requiresSite &&
+    hasUnlockStage(state, "public") &&
+    supply.peopleSupport < 25 &&
+    card.category !== "politics"
+  ) {
+    return "Public support too low";
+  }
+  if (
+    card.requiresSite &&
+    hasUnlockStage(state, "politics") &&
+    supply.politicalSupport < 25 &&
+    card.category !== "permitting"
+  ) {
+    return "Political support too low";
+  }
+  if (
+    hasUnlockStage(state, "infrastructure") &&
+    card.category === "compute" &&
+    supply.powerCoverage < 25
+  ) {
+    return "Power shortage blocks expansion";
+  }
+
+  const cost = getDynamicActionCost(state, card);
+  if (getBudgetRemaining(state) < cost) return "Not enough budget";
+  return null;
+}
+
+export function getUnlockedActions(state: GameState): ActionCard[] {
+  const period = getCurrentPeriod(state);
+  return ACTION_CARDS.filter((card) =>
+    isUnlockStageAvailable(period.unlockStage, card.unlockStage),
+  );
+}
+
+export function getVisibleMetrics(state: GameState): Set<string> {
+  const visible = new Set(["year", "budget", "compute", "outlook"]);
+
+  if (hasUnlockStage(state, "infrastructure")) {
+    visible.add("power");
+    visible.add("cooling");
+    visible.add("water");
+  }
+  if (hasUnlockStage(state, "public")) visible.add("peopleSupport");
+  if (hasUnlockStage(state, "politics")) visible.add("politicalSupport");
+
+  return visible;
 }
 
 export function canSelectAction(state: GameState, card: ActionCard): boolean {
   if (state.phase !== "planning" || state.outcome !== "active") return false;
-  if (state.year < card.availableYear) return false;
-  if (state.selectedActionIds.includes(card.id)) return false;
-  return getBudgetRemaining(state) >= card.cost;
+  return getActionLockReason(state, card) === null;
 }
 
 export function selectAction(state: GameState, cardId: string): GameState {
   const card = findAction(cardId);
   if (!canSelectAction(state, card)) return state;
+  const cost = getDynamicActionCost(state, card);
 
   return {
     ...state,
@@ -299,8 +503,12 @@ export function selectAction(state: GameState, cardId: string): GameState {
         id: projectId(),
         cardId: card.id,
         siteId: card.requiresSite ? state.selectedSiteId : null,
-        selectedYear: state.year,
-        readyYear: state.year + card.durationYears,
+        selectedPeriodIndex: state.periodIndex,
+        readyPeriodIndex: getReadyPeriodIndex(
+          state.periodIndex,
+          card.durationMonths,
+        ),
+        cost,
       },
     ],
   };
@@ -313,7 +521,8 @@ export function removeAction(
   const project = state.projects.find(
     (candidate) => candidate.id === projectIdToRemove,
   );
-  if (!project || project.selectedYear !== state.year) return state;
+  if (!project || project.selectedPeriodIndex !== state.periodIndex)
+    return state;
 
   return {
     ...state,
@@ -374,7 +583,14 @@ function eventEffects(
   const support: Partial<SupportState> = {};
   let emissionsIndex = state.emissionsIndex;
 
-  if (supply.powerCoverage < 70) {
+  if (supply.computeCoverage < 55) {
+    headlines.push(
+      "AI demand is moving faster than the active compute footprint.",
+    );
+    support.business = (support.business ?? 0) - 3;
+  }
+
+  if (hasUnlockStage(state, "infrastructure") && supply.powerCoverage < 70) {
     headlines.push(
       "Grid operator warns that AI load growth is outrunning firm power.",
     );
@@ -382,7 +598,7 @@ function eventEffects(
     support.regulator = (support.regulator ?? 0) - 4;
   }
 
-  if (supply.waterCoverage < 70) {
+  if (hasUnlockStage(state, "infrastructure") && supply.waterCoverage < 70) {
     headlines.push(
       "Water coalition challenges the footprint of new data-center construction.",
     );
@@ -397,6 +613,22 @@ function eventEffects(
     support.political = (support.political ?? 0) + 4;
     support.business = (support.business ?? 0) + 4;
     support.labor = (support.labor ?? 0) + 2;
+  }
+
+  if (hasUnlockStage(state, "public") && supply.peopleSupport < 40) {
+    headlines.push(
+      "Community pressure raises review costs for every visible expansion.",
+    );
+    support.political = (support.political ?? 0) - 3;
+    support.regulator = (support.regulator ?? 0) - 2;
+  }
+
+  if (hasUnlockStage(state, "politics") && supply.politicalSupport < 40) {
+    headlines.push(
+      "Policy sponsors delay public commitments until the coalition stabilizes.",
+    );
+    support.business = (support.business ?? 0) - 3;
+    support.regulator = (support.regulator ?? 0) - 3;
   }
 
   if (state.emissionsIndex > 62) {
@@ -446,18 +678,53 @@ export function getRecommendedActionIds(state: GameState): Set<string> {
   return recommended;
 }
 
+function managementScore(state: GameState, supply: SupplySummary): number {
+  const scores = [supply.computeCoverage];
+
+  if (hasUnlockStage(state, "infrastructure")) {
+    scores.push(
+      supply.powerCoverage,
+      supply.coolingCoverage,
+      supply.waterCoverage,
+    );
+  }
+  if (hasUnlockStage(state, "public")) scores.push(supply.peopleSupport);
+  if (hasUnlockStage(state, "politics")) scores.push(supply.politicalSupport);
+
+  return Math.round(
+    scores.reduce((sum, value) => sum + value, 0) / scores.length,
+  );
+}
+
+function updateOutlook(currentOutlook: number, score: number): number {
+  if (score >= 82) return clamp(currentOutlook + 6);
+  if (score >= 68) return clamp(currentOutlook + 3);
+  if (score < 42) return clamp(currentOutlook - 7);
+  if (score < 58) return clamp(currentOutlook - 3);
+  return currentOutlook;
+}
+
+function getBudgetBalanceForOutlook(outlook: number): number {
+  if (outlook >= 85) return 5;
+  if (outlook >= 75) return 3;
+  if (outlook >= 65) return 1;
+  if (outlook < 35) return -4;
+  if (outlook < 48) return -2;
+  return 0;
+}
+
 export function runAnnualPlan(state: GameState): GameState {
   if (state.phase !== "planning" || state.outcome !== "active") return state;
 
   const before = getSupplySummary(state);
   const plannedThisYear = state.projects.filter(
-    (project) => project.selectedYear === state.year,
+    (project) => project.selectedPeriodIndex === state.periodIndex,
   );
   const completedNow = state.projects.filter(
-    (project) => project.readyYear <= state.year,
+    (project) => project.readyPeriodIndex <= state.periodIndex,
   );
   const stillQueued = state.projects.filter(
-    (project) => project.readyYear > state.year,
+    (project) => project.readyPeriodIndex > state.periodIndex,
   );
   const completedProjects: string[] = [];
   let infrastructure = state.infrastructure;
@@ -499,20 +766,38 @@ export function runAnnualPlan(state: GameState): GameState {
 
   const eventState = { ...nextStateBase, support, emissionsIndex };
   const after = getSupplySummary(eventState);
+  const score = managementScore(eventState, after);
+  const outlook = updateOutlook(state.outlook, score);
+  const budgetBalance = getBudgetBalanceForOutlook(outlook);
+  const finalEventState = {
+    ...eventState,
+    outlook,
+    budgetBalance,
+  };
   const warnings = [
     after.computeCoverage < 65
       ? "Compute demand is outrunning built capacity."
       : "",
-    after.powerCoverage < 65 ? "Power is the binding constraint." : "",
-    after.coolingCoverage < 65
+    hasUnlockStage(eventState, "infrastructure") && after.powerCoverage < 65
+      ? "Power is the binding constraint."
+      : "",
+    hasUnlockStage(eventState, "infrastructure") && after.coolingCoverage < 65
       ? "Cooling capacity is below the current demand target."
       : "",
-    after.waterCoverage < 65
+    hasUnlockStage(eventState, "infrastructure") && after.waterCoverage < 65
       ? "Water resilience is under the safe operating threshold."
       : "",
-    after.peopleSupport < 45 ? "People support is close to collapse." : "",
-    after.politicalSupport < 45
+    hasUnlockStage(eventState, "public") && after.peopleSupport < 45
+      ? "People support is close to collapse."
+      : "",
+    hasUnlockStage(eventState, "politics") && after.politicalSupport < 45
       ? "Political support is close to collapse."
+      : "",
+    outlook < state.outlook
+      ? "Outlook fell; next period's budget and prices will tighten."
+      : "",
+    outlook > state.outlook
+      ? "Outlook improved; next period's budget and pricing will be easier."
       : "",
   ].filter(Boolean);
   const advisorTips = [
@@ -536,11 +821,13 @@ export function runAnnualPlan(state: GameState): GameState {
     completedProjects.length > 0
       ? `${completedProjects.length} project${completedProjects.length === 1 ? "" : "s"} came online.`
       : plannedThisYear.length > 0
-        ? "Projects entered the queue; longer builds will come online in a later year."
-        : "No annual plan was funded.";
-  const outcome = getOutcomeForState(eventState, after);
+        ? "Projects entered the queue; longer builds will come online in a later period."
+        : "No period plan was funded.";
+  const outcome = getOutcomeForState(finalEventState, after);
   const report: TurnReport = {
+    periodIndex: state.periodIndex,
     year: state.year,
+    periodLabel: getPeriodLabel(state),
     summary: `${completedText} Main bottleneck: ${after.mainBottleneck}.`,
     completedProjects,
     headlines:
@@ -558,11 +845,12 @@ export function runAnnualPlan(state: GameState): GameState {
       waterCoverage: after.waterCoverage - before.waterCoverage,
       peopleSupport: after.peopleSupport - before.peopleSupport,
       politicalSupport: after.politicalSupport - before.politicalSupport,
+      outlook: outlook - state.outlook,
     },
   };
 
   return {
-    ...eventState,
+    ...finalEventState,
     phase: outcome === "active" ? "report" : "finished",
     outcome,
     report,
@@ -573,8 +861,13 @@ function getOutcomeForState(
   state: GameState,
   supply = getSupplySummary(state),
 ): GameOutcomeStatus {
-  if (supply.peopleSupport <= 0 || supply.politicalSupport <= 0) return "lost";
-  if (state.year < END_YEAR) return "active";
+  if (hasUnlockStage(state, "public") && supply.peopleSupport <= 0) {
+    return "lost";
+  }
+  if (hasUnlockStage(state, "politics") && supply.politicalSupport <= 0) {
+    return "lost";
+  }
+  if (state.periodIndex < CAMPAIGN_PERIODS.length - 1) return "active";
 
   const score = calculateScore(state);
   const won =
@@ -592,14 +885,16 @@ function getOutcomeForState(
 export function continueFromReport(state: GameState): GameState {
   if (state.phase !== "report") return state;
 
-  const nextYear = state.year + 1;
-  if (nextYear > END_YEAR) {
+  const nextPeriodIndex = state.periodIndex + 1;
+  const nextPeriod = CAMPAIGN_PERIODS[nextPeriodIndex];
+  if (!nextPeriod) {
     return { ...state, phase: "finished", outcome: getOutcomeForState(state) };
   }
 
   return {
     ...state,
-    year: nextYear,
+    periodIndex: nextPeriodIndex,
+    year: nextPeriod.year,
     phase: "planning",
     report: null,
   };
@@ -622,7 +917,7 @@ export function formatBudget(value: number): string {
 }
 
 export function getCurrentPeriodLabel(state: GameState): string {
-  return String(state.year);
+  return getPeriodLabel(state);
 }
 
 export function calculateScore(
@@ -759,7 +1054,7 @@ export function calculateScore(
 
 export function getAffordableSites(state: GameState): DataCenterSite[] {
   const built = new Set(state.builtSiteIds);
-  return DATA_CENTER_SITES.filter((site) => !built.has(site.id));
+  return getSelectableSites(state).filter((site) => !built.has(site.id));
 }
 
 export function canBuildSite(state: GameState, siteId: string): boolean {
@@ -785,7 +1080,7 @@ export function getRunOutcome(state: GameState): RunOutcome {
     return {
       status: "in-progress",
       title: "Campaign in progress",
-      description: "Keep planning annual capacity until 2030.",
+      description: "Keep planning period capacity until 2030.",
     };
   }
 

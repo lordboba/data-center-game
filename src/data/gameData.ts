@@ -5,6 +5,255 @@ export const END_YEAR = 2030;
 export const WIN_SCORE = 720;
 export const MIN_DEMAND_TO_WIN = 88;
 
+export type UnlockStage =
+  | "siting"
+  | "compute"
+  | "infrastructure"
+  | "public"
+  | "politics"
+  | "operations"
+  | "monthly";
+
+export type CampaignPeriod = {
+  index: number;
+  year: number;
+  startMonth: number;
+  endMonth: number;
+  label: string;
+  cadence: "quarterly" | "bimonthly" | "monthly";
+  unlockStage: UnlockStage;
+};
+
+export type TutorialStep = {
+  id: string;
+  target: string;
+  unlockStage: UnlockStage;
+  title: string;
+  body: string;
+  nextLabel: string;
+};
+
+export type ProgressionRule = {
+  unlockStage: UnlockStage;
+  label: string;
+  startsAtPeriod: number;
+  description: string;
+};
+
+export const UNLOCK_STAGE_ORDER: UnlockStage[] = [
+  "siting",
+  "compute",
+  "infrastructure",
+  "public",
+  "politics",
+  "operations",
+  "monthly",
+];
+
+const MONTH_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+function periodLabel(year: number, startMonth: number, endMonth: number) {
+  if (startMonth === endMonth) return `${MONTH_LABELS[startMonth - 1]} ${year}`;
+  if (endMonth - startMonth === 2) {
+    return `Q${Math.floor((startMonth - 1) / 3) + 1} ${year}`;
+  }
+  return `${MONTH_LABELS[startMonth - 1]}-${MONTH_LABELS[endMonth - 1]} ${year}`;
+}
+
+function unlockStageForPeriod(year: number, startMonth: number): UnlockStage {
+  if (year === 2022 && startMonth === 1) return "siting";
+  if (year === 2022) return "compute";
+  if (year === 2023) return "infrastructure";
+  if (year === 2024) return "public";
+  if (year === 2025) return "politics";
+  if (year >= 2030) return "monthly";
+  return "operations";
+}
+
+function createCampaignPeriods(): CampaignPeriod[] {
+  const periods: CampaignPeriod[] = [];
+
+  for (let year = 2022; year <= 2025; year += 1) {
+    for (let startMonth = 1; startMonth <= 10; startMonth += 3) {
+      const endMonth = startMonth + 2;
+      periods.push({
+        index: periods.length,
+        year,
+        startMonth,
+        endMonth,
+        label: periodLabel(year, startMonth, endMonth),
+        cadence: "quarterly",
+        unlockStage: unlockStageForPeriod(year, startMonth),
+      });
+    }
+  }
+
+  for (let year = 2026; year <= 2029; year += 1) {
+    for (let startMonth = 1; startMonth <= 11; startMonth += 2) {
+      const endMonth = startMonth + 1;
+      periods.push({
+        index: periods.length,
+        year,
+        startMonth,
+        endMonth,
+        label: periodLabel(year, startMonth, endMonth),
+        cadence: "bimonthly",
+        unlockStage: unlockStageForPeriod(year, startMonth),
+      });
+    }
+  }
+
+  for (let month = 1; month <= 12; month += 1) {
+    periods.push({
+      index: periods.length,
+      year: 2030,
+      startMonth: month,
+      endMonth: month,
+      label: periodLabel(2030, month, month),
+      cadence: "monthly",
+      unlockStage: "monthly",
+    });
+  }
+
+  return periods;
+}
+
+export const CAMPAIGN_PERIODS = createCampaignPeriods();
+
+export const PROGRESSION_RULES: ProgressionRule[] = [
+  {
+    unlockStage: "siting",
+    label: "Siting",
+    startsAtPeriod: 0,
+    description: "Pick an initial market and fund the first campus.",
+  },
+  {
+    unlockStage: "compute",
+    label: "Compute",
+    startsAtPeriod: 1,
+    description: "Track compute demand and use smaller capacity stopgaps.",
+  },
+  {
+    unlockStage: "infrastructure",
+    label: "Infrastructure",
+    startsAtPeriod: 4,
+    description: "Power, cooling, and water constraints become active.",
+  },
+  {
+    unlockStage: "public",
+    label: "Public support",
+    startsAtPeriod: 8,
+    description:
+      "Community sentiment becomes visible and starts affecting cost.",
+  },
+  {
+    unlockStage: "politics",
+    label: "Politics",
+    startsAtPeriod: 12,
+    description: "Political support and permitting enter the planning surface.",
+  },
+  {
+    unlockStage: "operations",
+    label: "Operations",
+    startsAtPeriod: 16,
+    description: "The game shifts to two-month operating turns.",
+  },
+  {
+    unlockStage: "monthly",
+    label: "Monthly pressure",
+    startsAtPeriod: 40,
+    description: "2030 runs month by month against the final demand curve.",
+  },
+];
+
+export const TUTORIAL_STEPS: TutorialStep[] = [
+  {
+    id: "market",
+    target: "market-map",
+    unlockStage: "siting",
+    title: "Choose the first market",
+    body: "Your first job is siting. Pick a market before buying capacity; regional cards use the selected market.",
+    nextLabel: "Next",
+  },
+  {
+    id: "campus",
+    target: "open-actions",
+    unlockStage: "siting",
+    title: "Fund the first campus",
+    body: "Open the action panel. Early 2022 only asks you to farm the core resource: compute capacity, so start with one hyperscale campus.",
+    nextLabel: "Next",
+  },
+  {
+    id: "budget",
+    target: "metric-budget",
+    unlockStage: "siting",
+    title: "Watch budget",
+    body: "Every period has a smaller budget slice. Strong outlook adds room next turn; weak management raises prices.",
+    nextLabel: "Next",
+  },
+  {
+    id: "compute",
+    target: "metric-compute",
+    unlockStage: "siting",
+    title: "Track compute",
+    body: "Compute coverage is the first demand statistic. Falling behind makes later capacity more expensive.",
+    nextLabel: "Next",
+  },
+  {
+    id: "run",
+    target: "run-plan",
+    unlockStage: "siting",
+    title: "Advance the turn",
+    body: "Run the plan to complete ready projects, read the report, and move to the next period.",
+    nextLabel: "Next",
+  },
+  {
+    id: "report",
+    target: "turn-report",
+    unlockStage: "siting",
+    title: "Read the report",
+    body: "Reports explain what improved, what slipped, and which bottleneck should guide the next purchase.",
+    nextLabel: "Next",
+  },
+  {
+    id: "infrastructure",
+    target: "metric-power",
+    unlockStage: "infrastructure",
+    title: "Power unlocks the next layer",
+    body: "From 2023, compute is not enough. Power, cooling, and water all shape whether expansion can keep going.",
+    nextLabel: "Next",
+  },
+  {
+    id: "support",
+    target: "metric-support",
+    unlockStage: "public",
+    title: "Public support matters",
+    body: "In 2024, communities notice the buildout. If support drops too low, projects get costly and fragile.",
+    nextLabel: "Next",
+  },
+  {
+    id: "politics",
+    target: "metric-politics",
+    unlockStage: "politics",
+    title: "Politics arrives later",
+    body: "By 2025, policy and permitting become explicit. Support can now block expansion if ignored.",
+    nextLabel: "Done",
+  },
+];
+
 export type GameModeId = "monthly" | "quarterly";
 
 export type GameMode = {
@@ -303,6 +552,12 @@ export const DATA_CENTER_SITES: DataCenterSite[] = [
   },
 ];
 
+export const INITIAL_SITE_IDS = [
+  "ashburn-va",
+  "dallas-tx",
+  "hillsboro-or",
+] as const;
+
 export const REGION_TARGETS: Record<Region, number> = {
   East: 30,
   South: 28,
@@ -340,8 +595,8 @@ export type ActionCard = {
   shortTitle: string;
   category: ActionCategory;
   cost: number;
-  availableYear: number;
-  durationYears: number;
+  unlockStage: UnlockStage;
+  durationMonths: number;
   requiresSite: boolean;
   effects: ActionEffects;
   benefitText: string;
@@ -380,8 +635,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Hyperscale",
     category: "compute",
     cost: 5,
-    availableYear: 2022,
-    durationYears: 1,
+    unlockStage: "siting",
+    durationMonths: 0,
     requiresSite: true,
     effects: {
       computeH100e: 4_800_000,
@@ -402,8 +657,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Expansion",
     category: "compute",
     cost: 3,
-    availableYear: 2023,
-    durationYears: 1,
+    unlockStage: "compute",
+    durationMonths: 3,
     requiresSite: true,
     effects: {
       computeH100e: 2_200_000,
@@ -423,8 +678,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Colocation",
     category: "compute",
     cost: 2,
-    availableYear: 2022,
-    durationYears: 0,
+    unlockStage: "compute",
+    durationMonths: 0,
     requiresSite: false,
     effects: {
       computeH100e: 700_000,
@@ -443,8 +698,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Gas Power",
     category: "power",
     cost: 4,
-    availableYear: 2022,
-    durationYears: 1,
+    unlockStage: "infrastructure",
+    durationMonths: 4,
     requiresSite: true,
     effects: {
       powerMW: 8_500,
@@ -463,8 +718,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "PPA",
     category: "power",
     cost: 3,
-    availableYear: 2022,
-    durationYears: 1,
+    unlockStage: "infrastructure",
+    durationMonths: 4,
     requiresSite: false,
     effects: {
       powerMW: 4_800,
@@ -482,8 +737,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Interconnect",
     category: "power",
     cost: 4,
-    availableYear: 2023,
-    durationYears: 1,
+    unlockStage: "infrastructure",
+    durationMonths: 4,
     requiresSite: true,
     effects: {
       powerMW: 6_200,
@@ -500,8 +755,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Water Reuse",
     category: "water",
     cost: 3,
-    availableYear: 2022,
-    durationYears: 0,
+    unlockStage: "infrastructure",
+    durationMonths: 0,
     requiresSite: true,
     effects: {
       waterMLDay: 1_900,
@@ -520,8 +775,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Dry Cooling",
     category: "cooling",
     cost: 3,
-    availableYear: 2024,
-    durationYears: 0,
+    unlockStage: "infrastructure",
+    durationMonths: 0,
     requiresSite: true,
     effects: {
       coolingMW: 3_600,
@@ -539,8 +794,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Benefits",
     category: "politics",
     cost: 2,
-    availableYear: 2022,
-    durationYears: 0,
+    unlockStage: "public",
+    durationMonths: 0,
     requiresSite: true,
     effects: {
       peopleSupport: 8,
@@ -557,8 +812,8 @@ export const ACTION_CARDS: ActionCard[] = [
     shortTitle: "Permitting",
     category: "permitting",
     cost: 2,
-    availableYear: 2023,
-    durationYears: 0,
+    unlockStage: "politics",
+    durationMonths: 0,
     requiresSite: true,
     effects: {
       politicalSupport: 5,

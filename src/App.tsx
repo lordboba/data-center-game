@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
   BatteryCharging,
@@ -10,23 +10,29 @@ import {
   Flag,
   Gauge,
   Landmark,
+  MapPin,
+  Plus,
   Play,
   RotateCcw,
   ShieldCheck,
+  TriangleAlert,
   Trophy,
   Waves,
+  X,
   Zap,
 } from "lucide-react";
 import { UnitedStatesMap } from "./components/UnitedStatesMap";
 import {
-  ACTION_CARDS,
+  CAMPAIGN_PERIODS,
   DATA_CENTER_SITES,
   END_YEAR,
+  INITIAL_SITE_IDS,
   MAX_BUILDS,
   MIN_DEMAND_TO_WIN,
+  TUTORIAL_STEPS,
   WIN_SCORE,
 } from "./data/gameData";
-import type { ActionCard } from "./data/gameData";
+import type { ActionCard, DataCenterSite } from "./data/gameData";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import {
   calculateScore,
@@ -35,15 +41,23 @@ import {
   formatBudget,
   formatLargeNumber,
   GameState,
+  getActionLockReason,
   getAnnualBudget,
   getBudgetRemaining,
   getBuiltSites,
+  getCurrentPeriod,
   getCurrentPeriodLabel,
+  getDynamicActionCost,
   getPlannedCost,
+  getPeriodLabel,
   getRecommendedActionIds,
   getRunOutcome,
+  getSelectableSites,
   getSupplySummary,
+  getUnlockedActions,
+  getVisibleMetrics,
   initialGameState,
+  isUnlockStageAvailable,
   removeAction,
   restartRun,
   runAnnualPlan,
@@ -112,6 +126,9 @@ function AppShell({ children }: { children: React.ReactNode }) {
 
 function HomePage() {
   const { bestScore } = useLeaderboard();
+  const starterSites = DATA_CENTER_SITES.filter((site) =>
+    INITIAL_SITE_IDS.includes(site.id as (typeof INITIAL_SITE_IDS)[number]),
+  );
 
   return (
     <main className="home-page">
@@ -126,9 +143,9 @@ function HomePage() {
           <p className="eyebrow">Grid strategy simulator</p>
           <h1>Data Center Game</h1>
           <p className="lede">
-            Plan an annual AI infrastructure campaign from 2022 to 2030. Balance
-            compute, power, cooling, water, people support, and political
-            support before demand outruns the buildout.
+            Plan an AI infrastructure campaign from 2022 to 2030. Start with
+            siting and compute, then manage power, cooling, water, public
+            support, and political support as the calendar accelerates.
           </p>
           <div className="home-actions" aria-label="Home actions">
             <Link className="primary-action" to="/play">
@@ -150,8 +167,8 @@ function HomePage() {
               <strong>2022-2030</strong>
             </div>
             <div>
-              <span>Markets</span>
-              <strong>{DATA_CENTER_SITES.length}</strong>
+              <span>Starter choices</span>
+              <strong>{starterSites.length}</strong>
             </div>
           </div>
           <InfrastructureStack builtCount={MAX_BUILDS} compact />
@@ -163,7 +180,7 @@ function HomePage() {
             alt=""
             aria-hidden="true"
           />
-          <UnitedStatesMap compact />
+          <UnitedStatesMap compact sites={starterSites} />
         </div>
       </section>
     </main>
@@ -176,19 +193,41 @@ function MetricCard({
   label,
   value,
   tone,
+  tutorialTarget,
+  warningText,
 }: {
   icon?: React.ReactNode;
   asset?: string;
   label: string;
   value: string | number;
   tone?: "good" | "warning";
+  tutorialTarget?: string;
+  warningText?: string;
 }) {
+  const showWarning = tone === "warning";
+  const warningLabel =
+    warningText ?? "Low statistic. Consequences may apply if ignored.";
+
   return (
-    <div className={`metric-card ${tone ? `metric-card--${tone}` : ""}`}>
+    <div
+      className={`metric-card ${tone ? `metric-card--${tone}` : ""}`}
+      data-tutorial={tutorialTarget}
+    >
       <span className="metric-card__icon">
         {asset ? <img src={asset} alt="" aria-hidden="true" /> : icon}
       </span>
-      <span>{label}</span>
+      <span className="metric-card__label-row">
+        <span>{label}</span>
+        {showWarning && (
+          <span
+            className="metric-card__warning"
+            aria-label={warningLabel}
+            title={warningLabel}
+          >
+            <TriangleAlert size={15} />
+          </span>
+        )}
+      </span>
       <strong>{value}</strong>
     </div>
   );
@@ -221,10 +260,12 @@ function InfrastructureStack({
 
 function SitePanel({
   state,
-  setState,
+  sites,
+  onSelectSite,
 }: {
   state: GameState;
-  setState: React.Dispatch<React.SetStateAction<GameState>>;
+  sites: DataCenterSite[];
+  onSelectSite: (siteId: string) => void;
 }) {
   const selectedSite = DATA_CENTER_SITES.find(
     (site) => site.id === state.selectedSiteId,
@@ -236,7 +277,11 @@ function SitePanel({
     <aside className="decision-panel" aria-label="Market decision panel">
       <div className="turn-strip">
         <span>Market for regional cards</span>
-        <small>{state.builtSiteIds.length} active sites</small>
+        <small>
+          {state.builtSiteIds.length === 0
+            ? `${sites.length} starter choices`
+            : `${sites.length} available markets`}
+        </small>
       </div>
 
       <div className="selected-site">
@@ -275,17 +320,19 @@ function SitePanel({
           label="Water"
           value={selectedSite.waterSecurity}
           tone={selectedSite.waterSecurity < 55 ? "warning" : undefined}
+          warningText="Low water security can create permit and support pressure."
         />
         <MetricCard
           icon={<ShieldCheck size={15} />}
           label="Climate"
           value={selectedSite.climateResilience}
           tone={selectedSite.climateResilience < 60 ? "warning" : undefined}
+          warningText="Low climate resilience can raise operating risk."
         />
       </div>
 
       <div className="site-list" aria-label="Candidate markets">
-        {DATA_CENTER_SITES.map((site, index) => {
+        {sites.map((site, index) => {
           const isBuilt = builtSet.has(site.id);
           const isSelected = site.id === selectedSite.id;
           const siteAsset = infrastructureAsset(index);
@@ -299,9 +346,7 @@ function SitePanel({
                 isSelected ? "site-list-item--active" : "",
                 isBuilt ? "site-list-item--built" : "",
               ].join(" ")}
-              onClick={() =>
-                setState((current) => ({ ...current, selectedSiteId: site.id }))
-              }
+              onClick={() => onSelectSite(site.id)}
             >
               <span className="site-list-main">
                 <img
@@ -324,6 +369,98 @@ function SitePanel({
   );
 }
 
+function SelectedMarketSummary({
+  state,
+  siteCount,
+  onOpenMarket,
+}: {
+  state: GameState;
+  siteCount: number;
+  onOpenMarket: () => void;
+}) {
+  const selectedSite = DATA_CENTER_SITES.find(
+    (site) => site.id === state.selectedSiteId,
+  )!;
+
+  return (
+    <section className="selected-market-card">
+      <div>
+        <p className="eyebrow">Selected market</p>
+        <h2>
+          {selectedSite.metro}
+          <span>{selectedSite.state}</span>
+        </h2>
+      </div>
+      <div className="selected-market-card__stats">
+        <span>{selectedSite.region}</span>
+        <span>{selectedSite.capacity} MW</span>
+        <span>{selectedSite.cleanPower} clean</span>
+      </div>
+      <button
+        className="ghost-button"
+        type="button"
+        onClick={onOpenMarket}
+        data-tutorial="market-picker"
+      >
+        <MapPin size={16} />
+        {siteCount === INITIAL_SITE_IDS.length
+          ? "Choose market"
+          : "Change market"}
+      </button>
+    </section>
+  );
+}
+
+function CommandModal({
+  eyebrow,
+  title,
+  children,
+  onClose,
+  wide = false,
+}: {
+  eyebrow: string;
+  title: string;
+  children: React.ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div className="command-modal-backdrop">
+      <section
+        className={`command-modal ${wide ? "command-modal--wide" : ""}`}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <div className="command-modal__heading">
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2>{title}</h2>
+          </div>
+          <button
+            className="ghost-button command-modal__close"
+            type="button"
+            onClick={onClose}
+          >
+            <X size={16} />
+            Close
+          </button>
+        </div>
+        <div className="command-modal__body">{children}</div>
+      </section>
+    </div>
+  );
+}
+
 function categoryIcon(card: ActionCard) {
   if (card.category === "compute") return <Factory size={17} />;
   if (card.category === "power") return <Zap size={17} />;
@@ -336,23 +473,29 @@ function categoryIcon(card: ActionCard) {
 function ActionCardGrid({
   state,
   setState,
+  initialSiteConfirmed,
 }: {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
+  initialSiteConfirmed: boolean;
 }) {
   const recommended = getRecommendedActionIds(state);
   const budgetRemaining = getBudgetRemaining(state);
+  const visibleCards = getUnlockedActions(state);
 
   return (
-    <section className="action-card-grid" aria-label="Annual action cards">
-      {ACTION_CARDS.map((card) => {
+    <section className="action-card-grid" aria-label="Period action cards">
+      {visibleCards.map((card) => {
         const selected = state.selectedActionIds.includes(card.id);
-        const locked = state.year < card.availableYear;
+        const cost = getDynamicActionCost(state, card);
+        const lockReason =
+          !initialSiteConfirmed && state.periodIndex === 0 && card.requiresSite
+            ? "Choose a market first"
+            : getActionLockReason(state, card);
         const disabled =
           state.phase !== "planning" ||
-          selected ||
-          locked ||
-          budgetRemaining < card.cost;
+          lockReason !== null ||
+          budgetRemaining < cost;
         const isRecommended = recommended.has(card.id);
 
         return (
@@ -360,10 +503,12 @@ function ActionCardGrid({
             key={card.id}
             type="button"
             disabled={disabled}
+            data-tutorial={`action-${card.id}`}
             className={[
               "action-card",
               selected ? "action-card--selected" : "",
               isRecommended ? "action-card--recommended" : "",
+              lockReason ? "action-card--blocked" : "",
             ].join(" ")}
             onClick={() =>
               setState((current) => selectAction(current, card.id))
@@ -371,20 +516,23 @@ function ActionCardGrid({
           >
             <span className="action-card__topline">
               <span>{categoryIcon(card)}</span>
-              <b>{formatBudget(card.cost)}</b>
+              <b>{formatBudget(cost)}</b>
             </span>
             <strong>{card.title}</strong>
             <small>
-              {locked
-                ? `Unlocks ${card.availableYear}`
-                : `${card.durationYears === 0 ? "Instant" : `${card.durationYears} year`} · ${
-                    card.requiresSite ? "uses selected market" : "national"
-                  }`}
+              {`${
+                card.durationMonths === 0
+                  ? "Instant"
+                  : `${card.durationMonths} months`
+              } · ${card.requiresSite ? "uses selected market" : "national"}`}
             </small>
             <p>{card.benefitText}</p>
             <em>{card.riskText}</em>
             {isRecommended && (
               <span className="recommended-chip">Recommended</span>
+            )}
+            {lockReason && !selected && (
+              <span className="blocked-chip">{lockReason}</span>
             )}
           </button>
         );
@@ -396,26 +544,37 @@ function ActionCardGrid({
 function AnnualPlanTray({
   state,
   setState,
+  compact = false,
 }: {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
+  compact?: boolean;
 }) {
   const planned = state.projects.filter(
-    (project) => project.selectedYear === state.year,
+    (project) => project.selectedPeriodIndex === state.periodIndex,
   );
   const queued = state.projects.filter(
-    (project) => project.selectedYear < state.year,
+    (project) =>
+      project.selectedPeriodIndex < state.periodIndex &&
+      project.readyPeriodIndex > state.periodIndex,
   );
 
   return (
-    <section className="plan-grid">
+    <section
+      className={`plan-grid ${compact ? "plan-grid--compact" : ""}`}
+      data-tutorial="annual-plan"
+    >
       <div className="annual-plan-tray">
         <div className="panel-heading">
-          <p className="eyebrow">Annual plan</p>
+          <p className="eyebrow">Period plan</p>
           <h2>{planned.length} selected</h2>
         </div>
         {planned.length === 0 ? (
-          <p className="empty-copy">Choose cards above to fund this year.</p>
+          compact ? null : (
+            <p className="empty-copy">
+              Choose cards above to fund this period.
+            </p>
+          )
         ) : (
           planned.map((project) => {
             const card = findAction(project.cardId);
@@ -437,56 +596,78 @@ function AnnualPlanTray({
                   <b>{card.shortTitle}</b>
                   <small>{site ? site.metro : "National"}</small>
                 </span>
-                <strong>{formatBudget(card.cost)}</strong>
+                <strong>{formatBudget(project.cost)}</strong>
               </button>
             );
           })
         )}
       </div>
 
-      <div className="build-queue">
-        <div className="panel-heading">
-          <p className="eyebrow">Build queue</p>
-          <h2>{queued.length} pending</h2>
+      {(!compact || queued.length > 0) && (
+        <div className="build-queue">
+          <div className="panel-heading">
+            <p className="eyebrow">Build queue</p>
+            <h2>{queued.length} pending</h2>
+          </div>
+          {queued.length === 0 ? (
+            <p className="empty-copy">
+              Longer builds will appear here until ready.
+            </p>
+          ) : (
+            queued.map((project) => {
+              const card = findAction(project.cardId);
+              const readyPeriod = CAMPAIGN_PERIODS[project.readyPeriodIndex];
+              return (
+                <div key={project.id} className="queue-row">
+                  <span>{card.title}</span>
+                  <strong>{readyPeriod?.label ?? "Queued"}</strong>
+                </div>
+              );
+            })
+          )}
         </div>
-        {queued.length === 0 ? (
-          <p className="empty-copy">
-            Longer builds will appear here until ready.
-          </p>
-        ) : (
-          queued.map((project) => {
-            const card = findAction(project.cardId);
-            return (
-              <div key={project.id} className="queue-row">
-                <span>{card.title}</span>
-                <strong>{project.readyYear}</strong>
-              </div>
-            );
-          })
-        )}
-      </div>
+      )}
     </section>
   );
 }
 
-function AdvisorPanel({ state }: { state: GameState }) {
+function AdvisorPanel({
+  state,
+  compact = false,
+}: {
+  state: GameState;
+  compact?: boolean;
+}) {
   const supply = getSupplySummary(state);
+  const visibleMetrics = getVisibleMetrics(state);
 
   return (
-    <section className="advisor-panel">
+    <section
+      className={`advisor-panel ${compact ? "advisor-panel--compact" : ""}`}
+    >
       <div className="panel-heading">
-        <p className="eyebrow">Annual briefing</p>
+        <p className="eyebrow">Period briefing</p>
         <h2>{supply.mainBottleneck}</h2>
       </div>
-      <p>
-        Demand this year is {formatLargeNumber(supply.demand.h100e)} H100e and{" "}
-        {formatLargeNumber(supply.demand.powerMW)} MW. Recommended cards are
-        based on the lowest coverage or support score.
-      </p>
+      {!compact && (
+        <p>
+          Demand this period is {formatLargeNumber(supply.demand.h100e)} H100e
+          and {formatLargeNumber(supply.demand.powerMW)} MW. Recommended cards
+          are based on the lowest coverage or support score.
+        </p>
+      )}
       <div className="support-breakdown">
-        <span>People {supply.peopleSupport}</span>
-        <span>Political {supply.politicalSupport}</span>
+        {compact && (
+          <span>{formatLargeNumber(supply.demand.h100e)} H100e demand</span>
+        )}
+        {visibleMetrics.has("peopleSupport") && (
+          <span>People {supply.peopleSupport}</span>
+        )}
+        {visibleMetrics.has("politicalSupport") && (
+          <span>Political {supply.politicalSupport}</span>
+        )}
         <span>Emissions {state.emissionsIndex}</span>
+        <span>Outlook {state.outlook}</span>
       </div>
     </section>
   );
@@ -506,6 +687,7 @@ function TurnReportModal({
   const report = state.report;
   if (!report) return null;
   const final = state.phase === "finished";
+  const visibleMetrics = getVisibleMetrics(state);
 
   return (
     <div className="summary-overlay">
@@ -513,10 +695,11 @@ function TurnReportModal({
         className="turn-report"
         role="dialog"
         aria-modal="true"
-        aria-label="Year-end report"
+        aria-label="Turn report"
+        data-tutorial="turn-report"
       >
         <div className="panel-heading">
-          <p className="eyebrow">{report.year} year-end report</p>
+          <p className="eyebrow">{report.periodLabel} report</p>
           <h2>{final ? getRunOutcome(state).title : report.summary}</h2>
         </div>
         <div className="turn-report-grid">
@@ -526,28 +709,42 @@ function TurnReportModal({
               Compute {report.metricDeltas.computeCoverage >= 0 ? "+" : ""}
               {report.metricDeltas.computeCoverage}
             </span>
-            <span>
-              Power {report.metricDeltas.powerCoverage >= 0 ? "+" : ""}
-              {report.metricDeltas.powerCoverage}
-            </span>
-            <span>
-              Cooling {report.metricDeltas.coolingCoverage >= 0 ? "+" : ""}
-              {report.metricDeltas.coolingCoverage}
-            </span>
-            <span>
-              Water {report.metricDeltas.waterCoverage >= 0 ? "+" : ""}
-              {report.metricDeltas.waterCoverage}
-            </span>
+            {visibleMetrics.has("power") && (
+              <span>
+                Power {report.metricDeltas.powerCoverage >= 0 ? "+" : ""}
+                {report.metricDeltas.powerCoverage}
+              </span>
+            )}
+            {visibleMetrics.has("cooling") && (
+              <span>
+                Cooling {report.metricDeltas.coolingCoverage >= 0 ? "+" : ""}
+                {report.metricDeltas.coolingCoverage}
+              </span>
+            )}
+            {visibleMetrics.has("water") && (
+              <span>
+                Water {report.metricDeltas.waterCoverage >= 0 ? "+" : ""}
+                {report.metricDeltas.waterCoverage}
+              </span>
+            )}
           </article>
           <article>
             <h3>Support deltas</h3>
+            {visibleMetrics.has("peopleSupport") && (
+              <span>
+                People {report.metricDeltas.peopleSupport >= 0 ? "+" : ""}
+                {report.metricDeltas.peopleSupport}
+              </span>
+            )}
+            {visibleMetrics.has("politicalSupport") && (
+              <span>
+                Political {report.metricDeltas.politicalSupport >= 0 ? "+" : ""}
+                {report.metricDeltas.politicalSupport}
+              </span>
+            )}
             <span>
-              People {report.metricDeltas.peopleSupport >= 0 ? "+" : ""}
-              {report.metricDeltas.peopleSupport}
-            </span>
-            <span>
-              Political {report.metricDeltas.politicalSupport >= 0 ? "+" : ""}
-              {report.metricDeltas.politicalSupport}
+              Outlook {report.metricDeltas.outlook >= 0 ? "+" : ""}
+              {report.metricDeltas.outlook}
             </span>
           </article>
         </div>
@@ -598,7 +795,8 @@ function TurnReportModal({
               onClick={onContinue}
             >
               <ChevronRight size={18} />
-              Continue to {state.year + 1}
+              Continue to{" "}
+              {CAMPAIGN_PERIODS[state.periodIndex + 1]?.label ?? "final score"}
             </button>
           )}
         </div>
@@ -704,53 +902,103 @@ function RunSummary({
   );
 }
 
-function OnboardingOverlay({ onStart }: { onStart: () => void }) {
+type TutorialOverlayProps = {
+  active: boolean;
+  step: (typeof TUTORIAL_STEPS)[number] | undefined;
+  stepIndex: number;
+  stepCount: number;
+  onNext: () => void;
+  onBack: () => void;
+  onSkip: () => void;
+};
+
+function TutorialOverlay({
+  active,
+  step,
+  stepIndex,
+  stepCount,
+  onNext,
+  onBack,
+  onSkip,
+}: TutorialOverlayProps) {
+  const [targetRect, setTargetRect] = useState<DOMRect | null>(null);
+
+  useLayoutEffect(() => {
+    if (!active || !step) return;
+
+    const updateTarget = () => {
+      const element = document.querySelector<HTMLElement>(
+        `[data-tutorial="${step.target}"]`,
+      );
+      setTargetRect(element?.getBoundingClientRect() ?? null);
+    };
+
+    updateTarget();
+    window.addEventListener("resize", updateTarget);
+    window.addEventListener("scroll", updateTarget, true);
+
+    return () => {
+      window.removeEventListener("resize", updateTarget);
+      window.removeEventListener("scroll", updateTarget, true);
+    };
+  }, [active, step]);
+
+  if (!active || !step) return null;
+
+  const fallbackTop = 118;
+  const fallbackLeft = 24;
+  const popoverHeight = Math.min(300, window.innerHeight - 36);
+  const panelTop = targetRect
+    ? Math.min(
+        window.innerHeight - popoverHeight - 18,
+        Math.max(18, targetRect.bottom + 14),
+      )
+    : fallbackTop;
+  const panelLeft = targetRect
+    ? Math.max(18, Math.min(window.innerWidth - 360, targetRect.left))
+    : fallbackLeft;
+
   return (
-    <div className="summary-overlay">
+    <div className="tutorial-layer" aria-live="polite">
+      {targetRect && (
+        <div
+          className="tutorial-highlight"
+          style={{
+            top: targetRect.top - 8,
+            left: targetRect.left - 8,
+            width: targetRect.width + 16,
+            height: targetRect.height + 16,
+          }}
+        />
+      )}
       <section
-        className="tutorial-card"
+        className="tutorial-popover"
         role="dialog"
-        aria-modal="true"
-        aria-label="Game tutorial"
+        aria-label="Active tutorial"
+        style={{ top: panelTop, left: panelLeft }}
       >
         <div className="tutorial-kicker">
           <BookOpen size={18} />
-          Tutorial
+          Tutorial {stepIndex + 1}/{stepCount}
         </div>
-        <h2>Build the AI footprint without losing the coalition.</h2>
-        <button
-          className="primary-action tutorial-start"
-          type="button"
-          onClick={onStart}
-        >
-          <CheckCircle2 size={18} />
-          Start 2022 plan
-        </button>
-        <div className="tutorial-grid">
-          <article>
-            <span>1</span>
-            <h3>Pick a market</h3>
-            <p>
-              The map sets the selected market for regional cards such as
-              campuses, grid interconnects, water reuse, and benefits packages.
-            </p>
-          </article>
-          <article>
-            <span>2</span>
-            <h3>Fund cards</h3>
-            <p>
-              Each year has its own budget. Recommended cards target the current
-              bottleneck, but every card has a tradeoff.
-            </p>
-          </article>
-          <article>
-            <span>3</span>
-            <h3>Read reports</h3>
-            <p>
-              Reports explain completed projects, support swings, warnings, and
-              the next bottleneck before the campaign moves forward.
-            </p>
-          </article>
+        <h2>{step.title}</h2>
+        <p>{step.body}</p>
+        <div className="tutorial-actions">
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={onBack}
+            disabled={stepIndex === 0}
+          >
+            Back
+          </button>
+          <button className="primary-action" type="button" onClick={onNext}>
+            <CheckCircle2 size={18} />
+            {step.nextLabel}
+          </button>
+          <button className="ghost-button" type="button" onClick={onSkip}>
+            Skip
+          </button>
         </div>
       </section>
     </div>
@@ -760,23 +1008,49 @@ function OnboardingOverlay({ onStart }: { onStart: () => void }) {
 function PlayPage() {
   const [state, setState] = useState<GameState>(initialGameState);
   const [showSummary, setShowSummary] = useState(false);
-  const [tutorialOpen, setTutorialOpen] = useState(true);
+  const [tutorialActive, setTutorialActive] = useState(true);
+  const [tutorialStepIndex, setTutorialStepIndex] = useState(0);
+  const [siteTouched, setSiteTouched] = useState(false);
+  const [activePanel, setActivePanel] = useState<"market" | "actions" | null>(
+    null,
+  );
   const supply = getSupplySummary(state);
   const builtSites = getBuiltSites(state);
+  const selectableSites = getSelectableSites(state);
   const budgetRemaining = getBudgetRemaining(state);
-  const annualBudget = getAnnualBudget(state.year);
+  const annualBudget = getAnnualBudget(state);
   const plannedCost = getPlannedCost(state);
   const score = calculateScore(state);
+  const visibleMetrics = getVisibleMetrics(state);
+  const currentPeriod = getCurrentPeriod(state);
+  const availableTutorialSteps = useMemo(
+    () =>
+      TUTORIAL_STEPS.filter((step) =>
+        isUnlockStageAvailable(currentPeriod.unlockStage, step.unlockStage),
+      ),
+    [currentPeriod.unlockStage],
+  );
+  const activeTutorialStep = availableTutorialSteps[tutorialStepIndex];
   const displaySummary =
     showSummary || (state.phase === "finished" && !state.report);
 
   const restart = () => {
     setState(restartRun());
     setShowSummary(false);
-    setTutorialOpen(true);
+    setTutorialActive(true);
+    setTutorialStepIndex(0);
+    setSiteTouched(false);
+    setActivePanel(null);
+  };
+
+  const selectSite = (siteId: string) => {
+    setSiteTouched(true);
+    setState((current) => ({ ...current, selectedSiteId: siteId }));
+    setActivePanel(null);
   };
 
   const runPlan = () => {
+    setActivePanel(null);
     setState((current) => runAnnualPlan(current));
   };
 
@@ -788,6 +1062,35 @@ function PlayPage() {
     setState((current) => ({ ...current, report: null }));
     setShowSummary(true);
   };
+
+  const selectedThisPeriod = state.projects.filter(
+    (project) => project.selectedPeriodIndex === state.periodIndex,
+  );
+
+  useEffect(() => {
+    if (!tutorialActive || !activeTutorialStep) return;
+
+    const completed =
+      (activeTutorialStep.id === "market" && siteTouched) ||
+      (activeTutorialStep.id === "campus" &&
+        state.projects.some(
+          (project) => project.cardId === "hyperscale-campus",
+        )) ||
+      (activeTutorialStep.id === "run" && Boolean(state.report)) ||
+      (activeTutorialStep.id === "report" && state.phase === "planning");
+
+    if (completed) {
+      setTutorialStepIndex((current) => current + 1);
+    }
+  }, [
+    activeTutorialStep,
+    availableTutorialSteps.length,
+    siteTouched,
+    state.phase,
+    state.projects,
+    state.report,
+    tutorialActive,
+  ]);
 
   return (
     <main className="play-page">
@@ -805,15 +1108,13 @@ function PlayPage() {
             className="primary-action"
             type="button"
             onClick={runPlan}
+            data-tutorial="run-plan"
             disabled={
-              state.phase !== "planning" ||
-              state.projects.filter(
-                (project) => project.selectedYear === state.year,
-              ).length === 0
+              state.phase !== "planning" || selectedThisPeriod.length === 0
             }
           >
             <Play size={16} />
-            Run annual plan
+            Run period plan
           </button>
         </div>
       </section>
@@ -821,46 +1122,87 @@ function PlayPage() {
       <section className="score-band" aria-label="Run metrics">
         <MetricCard
           asset={generatedAssets.labels.year}
-          label="Year"
-          value={`${state.year}/${END_YEAR}`}
+          label="Turn"
+          value={`${getPeriodLabel(state)} / ${END_YEAR}`}
+          tutorialTarget="metric-year"
         />
         <MetricCard
           asset={generatedAssets.labels.budget}
           label="Budget"
           value={`${formatBudget(budgetRemaining)} / ${formatBudget(annualBudget)}`}
           tone={budgetRemaining <= 2 ? "warning" : undefined}
+          tutorialTarget="metric-budget"
+          warningText="Low remaining budget means fewer projects can be funded this period."
+        />
+        <MetricCard
+          icon={<Gauge size={16} />}
+          label="Outlook"
+          value={state.outlook}
+          tone={state.outlook < 45 ? "warning" : undefined}
+          tutorialTarget="metric-outlook"
+          warningText="Weak outlook tightens next-period budget and project pricing."
         />
         <MetricCard
           asset={generatedAssets.labels.demand}
           label="Compute"
           value={`${supply.computeCoverage}%`}
           tone={supply.computeCoverage < 65 ? "warning" : undefined}
+          tutorialTarget="metric-compute"
+          warningText="Low compute coverage raises pressure and hurts the final demand test."
         />
-        <MetricCard
-          asset={generatedAssets.labels.power}
-          label="Power"
-          value={`${supply.powerCoverage}%`}
-          tone={supply.powerCoverage < 65 ? "warning" : undefined}
-        />
-        <MetricCard
-          icon={<Waves size={16} />}
-          label="Water"
-          value={`${supply.waterCoverage}%`}
-          tone={supply.waterCoverage < 65 ? "warning" : undefined}
-        />
-        <MetricCard
-          icon={<Landmark size={16} />}
-          label="Support"
-          value={`${supply.peopleSupport}/${supply.politicalSupport}`}
-          tone={
-            supply.peopleSupport < 45 || supply.politicalSupport < 45
-              ? "warning"
-              : undefined
-          }
-        />
+        {visibleMetrics.has("power") && (
+          <MetricCard
+            asset={generatedAssets.labels.power}
+            label="Power"
+            value={`${supply.powerCoverage}%`}
+            tone={supply.powerCoverage < 65 ? "warning" : undefined}
+            tutorialTarget="metric-power"
+            warningText="Low power coverage can block compute expansion."
+          />
+        )}
+        {visibleMetrics.has("cooling") && (
+          <MetricCard
+            icon={<Gauge size={16} />}
+            label="Cooling"
+            value={`${supply.coolingCoverage}%`}
+            tone={supply.coolingCoverage < 65 ? "warning" : undefined}
+            tutorialTarget="metric-cooling"
+            warningText="Low cooling coverage makes capacity less reliable."
+          />
+        )}
+        {visibleMetrics.has("water") && (
+          <MetricCard
+            icon={<Waves size={16} />}
+            label="Water"
+            value={`${supply.waterCoverage}%`}
+            tone={supply.waterCoverage < 65 ? "warning" : undefined}
+            tutorialTarget="metric-water"
+            warningText="Low water resilience damages support and permitting."
+          />
+        )}
+        {visibleMetrics.has("peopleSupport") && (
+          <MetricCard
+            icon={<Flag size={16} />}
+            label="People"
+            value={supply.peopleSupport}
+            tone={supply.peopleSupport < 45 ? "warning" : undefined}
+            tutorialTarget="metric-support"
+            warningText="Low public support raises review costs and can stop expansion."
+          />
+        )}
+        {visibleMetrics.has("politicalSupport") && (
+          <MetricCard
+            icon={<Landmark size={16} />}
+            label="Politics"
+            value={supply.politicalSupport}
+            tone={supply.politicalSupport < 45 ? "warning" : undefined}
+            tutorialTarget="metric-politics"
+            warningText="Low political support can block expansion."
+          />
+        )}
       </section>
 
-      <div className="budget-meter" aria-label="Annual budget used">
+      <div className="budget-meter" aria-label="Period budget used">
         <span
           style={{
             width: `${Math.min(100, (plannedCost / annualBudget) * 100)}%`,
@@ -871,37 +1213,66 @@ function PlayPage() {
         builtCount={Math.min(builtSites.length, MAX_BUILDS)}
       />
 
-      <section className="game-layout">
-        <div className="map-stage">
+      <section className="play-dashboard">
+        <div className="map-stage" data-tutorial="market-map">
           <div className="map-topline">
             <div>
               <p className="eyebrow">US atlas</p>
-              <h2>Choose a market, then fund cards</h2>
+              <h2>Starter slate: {selectableSites.length} markets</h2>
             </div>
             <span>{builtSites.length} built</span>
           </div>
           <UnitedStatesMap
             builtSiteIds={state.builtSiteIds}
             selectedSiteId={state.selectedSiteId}
-            onSelectSite={(siteId) =>
-              setState((current) => ({ ...current, selectedSiteId: siteId }))
-            }
+            sites={selectableSites}
+            onSelectSite={selectSite}
           />
-          <AdvisorPanel state={state} />
+          <AdvisorPanel state={state} compact />
         </div>
-        <SitePanel state={state} setState={setState} />
-      </section>
-
-      <ActionCardGrid state={state} setState={setState} />
-      <AnnualPlanTray state={state} setState={setState} />
-
-      <section className="score-footer">
-        <span>Current score projection</span>
-        <strong>{score.score}</strong>
-        <span>
-          Win target: {WIN_SCORE} and {MIN_DEMAND_TO_WIN}% final compute
-          coverage
-        </span>
+        <div className="command-column">
+          <SelectedMarketSummary
+            state={state}
+            siteCount={selectableSites.length}
+            onOpenMarket={() => setActivePanel("market")}
+          />
+          <section className="command-panel">
+            <div className="panel-heading">
+              <p className="eyebrow">Actions</p>
+              <h2>{selectedThisPeriod.length} funded</h2>
+            </div>
+            <p>
+              Open the action panel to fund unlocked projects, then run the
+              period once your plan is ready.
+            </p>
+            <div className="command-panel__actions">
+              <button
+                className="secondary-action"
+                type="button"
+                onClick={() => setActivePanel("actions")}
+                data-tutorial="open-actions"
+              >
+                <Plus size={16} />
+                Fund actions
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={() => setActivePanel("market")}
+              >
+                <MapPin size={16} />
+                Markets
+              </button>
+            </div>
+            <div className="command-score">
+              <span>Score projection</span>
+              <strong>{score.score}</strong>
+              <small>
+                Target {WIN_SCORE} + {MIN_DEMAND_TO_WIN}% final compute
+              </small>
+            </div>
+          </section>
+        </div>
       </section>
 
       {state.report && (
@@ -917,8 +1288,50 @@ function PlayPage() {
           <RunSummary state={state} onRestart={restart} />
         </div>
       )}
-      {tutorialOpen && (
-        <OnboardingOverlay onStart={() => setTutorialOpen(false)} />
+      <TutorialOverlay
+        active={tutorialActive}
+        step={activeTutorialStep}
+        stepIndex={tutorialStepIndex}
+        stepCount={availableTutorialSteps.length}
+        onBack={() =>
+          setTutorialStepIndex((current) => Math.max(0, current - 1))
+        }
+        onNext={() => {
+          setTutorialStepIndex((current) => current + 1);
+        }}
+        onSkip={() => setTutorialActive(false)}
+      />
+      {activePanel === "market" && (
+        <CommandModal
+          eyebrow="Market slate"
+          title={
+            state.builtSiteIds.length === 0
+              ? "Choose from 3 starter markets"
+              : "Choose a regional market"
+          }
+          onClose={() => setActivePanel(null)}
+        >
+          <SitePanel
+            state={state}
+            sites={selectableSites}
+            onSelectSite={selectSite}
+          />
+        </CommandModal>
+      )}
+      {activePanel === "actions" && (
+        <CommandModal
+          eyebrow="Funding panel"
+          title="Fund unlocked actions"
+          onClose={() => setActivePanel(null)}
+          wide
+        >
+          <ActionCardGrid
+            state={state}
+            setState={setState}
+            initialSiteConfirmed={siteTouched}
+          />
+          <AnnualPlanTray state={state} setState={setState} />
+        </CommandModal>
       )}
     </main>
   );
