@@ -1,6 +1,7 @@
 export const MAX_BUILDS = 6;
 export const STARTING_BUDGET = 120;
-export const START_YEAR = 2026;
+export const START_YEAR = 2022;
+export const END_YEAR = 2030;
 export const WIN_SCORE = 720;
 export const MIN_DEMAND_TO_WIN = 88;
 
@@ -24,7 +25,8 @@ export const GAME_MODES: GameMode[] = [
     stepMonths: 3,
     maxPeriods: 8,
     secondsPerPeriod: 45,
-    description: "Advance one quarter at a time across a two-year planning window.",
+    description:
+      "Advance one quarter at a time across a two-year planning window.",
   },
   {
     id: "monthly",
@@ -33,7 +35,8 @@ export const GAME_MODES: GameMode[] = [
     stepMonths: 1,
     maxPeriods: 12,
     secondsPerPeriod: 20,
-    description: "Advance one month at a time across one compressed build year.",
+    description:
+      "Advance one month at a time across one compressed build year.",
   },
 ];
 
@@ -307,3 +310,264 @@ export const REGION_TARGETS: Record<Region, number> = {
   Mountain: 8,
   West: 12,
 };
+
+export type ActionCategory =
+  | "compute"
+  | "power"
+  | "cooling"
+  | "water"
+  | "politics"
+  | "permitting"
+  | "efficiency";
+
+export type ActionEffects = {
+  computeH100e?: number;
+  powerMW?: number;
+  coolingMW?: number;
+  waterMLDay?: number;
+  peopleSupport?: number;
+  politicalSupport?: number;
+  environmentalSupport?: number;
+  laborSupport?: number;
+  regulatorSupport?: number;
+  businessSupport?: number;
+  emissionsIndex?: number;
+};
+
+export type ActionCard = {
+  id: string;
+  title: string;
+  shortTitle: string;
+  category: ActionCategory;
+  cost: number;
+  availableYear: number;
+  durationYears: number;
+  requiresSite: boolean;
+  effects: ActionEffects;
+  benefitText: string;
+  riskText: string;
+  flavorText: string;
+};
+
+export const ANNUAL_BUDGETS: Record<number, number> = {
+  2022: 8,
+  2023: 9,
+  2024: 11,
+  2025: 14,
+  2026: 17,
+  2027: 20,
+  2028: 22,
+  2029: 22,
+  2030: 24,
+};
+
+export const DEMAND_CURVE = [
+  { year: 2022, h100e: 3_941, powerMW: 57 },
+  { year: 2023, h100e: 118_742, powerMW: 340 },
+  { year: 2024, h100e: 585_947, powerMW: 1_611 },
+  { year: 2025, h100e: 3_765_163, powerMW: 5_904 },
+  { year: 2026, h100e: 11_897_305, powerMW: 15_002 },
+  { year: 2027, h100e: 24_160_918, powerMW: 22_674 },
+  { year: 2028, h100e: 48_290_532, powerMW: 35_510 },
+  { year: 2029, h100e: 49_026_133, powerMW: 35_919 },
+  { year: 2030, h100e: 48_250_842, powerMW: 36_213 },
+];
+
+export const ACTION_CARDS: ActionCard[] = [
+  {
+    id: "hyperscale-campus",
+    title: "Build Hyperscale Campus",
+    shortTitle: "Hyperscale",
+    category: "compute",
+    cost: 5,
+    availableYear: 2022,
+    durationYears: 1,
+    requiresSite: true,
+    effects: {
+      computeH100e: 4_800_000,
+      coolingMW: 900,
+      waterMLDay: -90,
+      peopleSupport: -4,
+      environmentalSupport: -3,
+      businessSupport: 3,
+    },
+    benefitText: "+4.8M H100e and +900 MW cooling after construction.",
+    riskText: "Raises local scrutiny and water pressure.",
+    flavorText:
+      "A large AI campus that turns the selected market into core capacity.",
+  },
+  {
+    id: "expand-campus",
+    title: "Expand Existing Campus",
+    shortTitle: "Expansion",
+    category: "compute",
+    cost: 3,
+    availableYear: 2023,
+    durationYears: 1,
+    requiresSite: true,
+    effects: {
+      computeH100e: 2_200_000,
+      coolingMW: 420,
+      waterMLDay: -36,
+      peopleSupport: -2,
+      businessSupport: 2,
+    },
+    benefitText: "+2.2M H100e using an existing selected-market footprint.",
+    riskText: "Adds load before every utility upgrade catches up.",
+    flavorText:
+      "Denser halls, more substations, and a faster but noisier build.",
+  },
+  {
+    id: "lease-colocation",
+    title: "Lease Colocation Capacity",
+    shortTitle: "Colocation",
+    category: "compute",
+    cost: 2,
+    availableYear: 2022,
+    durationYears: 0,
+    requiresSite: false,
+    effects: {
+      computeH100e: 700_000,
+      powerMW: -80,
+      coolingMW: -24,
+      businessSupport: 1,
+    },
+    benefitText: "+700K H100e immediately.",
+    riskText:
+      "Expensive stopgap capacity that consumes hidden power and cooling.",
+    flavorText: "Lease available cages while the larger build catches up.",
+  },
+  {
+    id: "fast-gas-capacity",
+    title: "Build Fast Gas Capacity",
+    shortTitle: "Gas Power",
+    category: "power",
+    cost: 4,
+    availableYear: 2022,
+    durationYears: 1,
+    requiresSite: true,
+    effects: {
+      powerMW: 8_500,
+      politicalSupport: 2,
+      peopleSupport: -4,
+      environmentalSupport: -8,
+      emissionsIndex: 12,
+    },
+    benefitText: "+8.5 GW dispatchable power.",
+    riskText: "Higher emissions and local opposition.",
+    flavorText: "Fast reliability at a real legitimacy cost.",
+  },
+  {
+    id: "renewables-ppa",
+    title: "Sign Renewables PPA",
+    shortTitle: "PPA",
+    category: "power",
+    cost: 3,
+    availableYear: 2022,
+    durationYears: 1,
+    requiresSite: false,
+    effects: {
+      powerMW: 4_800,
+      environmentalSupport: 5,
+      peopleSupport: 1,
+      emissionsIndex: -6,
+    },
+    benefitText: "+4.8 GW cleaner contracted power.",
+    riskText: "Slower than gas and still needs interconnection capacity.",
+    flavorText: "Long-term clean supply with less community backlash.",
+  },
+  {
+    id: "grid-interconnect",
+    title: "Build Grid Interconnect",
+    shortTitle: "Interconnect",
+    category: "power",
+    cost: 4,
+    availableYear: 2023,
+    durationYears: 1,
+    requiresSite: true,
+    effects: {
+      powerMW: 6_200,
+      regulatorSupport: 3,
+      politicalSupport: 1,
+    },
+    benefitText: "+6.2 GW deliverable power and better regulator confidence.",
+    riskText: "Uses budget without adding compute by itself.",
+    flavorText: "Transmission, switching gear, and queue discipline.",
+  },
+  {
+    id: "water-recycling",
+    title: "Add Water Recycling",
+    shortTitle: "Water Reuse",
+    category: "water",
+    cost: 3,
+    availableYear: 2022,
+    durationYears: 0,
+    requiresSite: true,
+    effects: {
+      waterMLDay: 1_900,
+      peopleSupport: 2,
+      environmentalSupport: 5,
+      regulatorSupport: 2,
+    },
+    benefitText: "+1,900 ML/day water resilience.",
+    riskText: "Does not solve compute or power pressure.",
+    flavorText:
+      "Reuse loops and public commitments that make permits less fragile.",
+  },
+  {
+    id: "dry-cooling",
+    title: "Add Dry Cooling",
+    shortTitle: "Dry Cooling",
+    category: "cooling",
+    cost: 3,
+    availableYear: 2024,
+    durationYears: 0,
+    requiresSite: true,
+    effects: {
+      coolingMW: 3_600,
+      waterMLDay: 900,
+      powerMW: -450,
+      environmentalSupport: 3,
+    },
+    benefitText: "+3.6 GW cooling and lower water exposure.",
+    riskText: "Consumes additional power headroom.",
+    flavorText: "More air-side cooling, less evaporative dependence.",
+  },
+  {
+    id: "community-benefits",
+    title: "Community Benefits Package",
+    shortTitle: "Benefits",
+    category: "politics",
+    cost: 2,
+    availableYear: 2022,
+    durationYears: 0,
+    requiresSite: true,
+    effects: {
+      peopleSupport: 8,
+      laborSupport: 4,
+      politicalSupport: 2,
+    },
+    benefitText: "+8 people support and stronger labor backing.",
+    riskText: "Consumes budget without adding capacity.",
+    flavorText: "Jobs, grants, tax-sharing, and visible concessions.",
+  },
+  {
+    id: "fast-track-permitting",
+    title: "Fast-Track Permitting",
+    shortTitle: "Permitting",
+    category: "permitting",
+    cost: 2,
+    availableYear: 2023,
+    durationYears: 0,
+    requiresSite: true,
+    effects: {
+      politicalSupport: 5,
+      regulatorSupport: 4,
+      peopleSupport: -2,
+      environmentalSupport: -2,
+    },
+    benefitText: "+5 political support and +4 regulator support.",
+    riskText: "Public groups dislike rushed approvals.",
+    flavorText: "Executive pressure, staff capacity, and procedural shortcuts.",
+  },
+];

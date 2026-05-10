@@ -1,12 +1,15 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
   BatteryCharging,
   BookOpen,
   Building2,
+  CheckCircle2,
   ChevronRight,
-  Clock3,
-  MapPin,
+  Factory,
+  Flag,
+  Gauge,
+  Landmark,
   Play,
   RotateCcw,
   ShieldCheck,
@@ -16,31 +19,35 @@ import {
 } from "lucide-react";
 import { UnitedStatesMap } from "./components/UnitedStatesMap";
 import {
+  ACTION_CARDS,
   DATA_CENTER_SITES,
-  DEFAULT_GAME_MODE_ID,
-  GAME_MODES,
+  END_YEAR,
   MAX_BUILDS,
   MIN_DEMAND_TO_WIN,
   WIN_SCORE,
 } from "./data/gameData";
-import type { GameModeId } from "./data/gameData";
+import type { ActionCard } from "./data/gameData";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import {
-  advancePeriod,
-  buildSite,
   calculateScore,
-  canBuildSite,
-  finishRun,
+  continueFromReport,
+  findAction,
   formatBudget,
+  formatLargeNumber,
   GameState,
-  getAffordableSites,
+  getAnnualBudget,
+  getBudgetRemaining,
   getBuiltSites,
   getCurrentPeriodLabel,
-  getGameMode,
+  getPlannedCost,
+  getRecommendedActionIds,
   getRunOutcome,
+  getSupplySummary,
   initialGameState,
+  removeAction,
   restartRun,
-  selectNextCandidate,
+  runAnnualPlan,
+  selectAction,
 } from "./lib/gameEngine";
 
 const generatedAssets = {
@@ -75,12 +82,6 @@ const generatedAssets = {
     },
   ],
 };
-
-function formatClock(totalSeconds: number): string {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
-}
 
 function infrastructureAsset(index: number) {
   return generatedAssets.infrastructure[
@@ -125,8 +126,9 @@ function HomePage() {
           <p className="eyebrow">Grid strategy simulator</p>
           <h1>Data Center Game</h1>
           <p className="lede">
-            Pick a six-site US footprint, balance latency against power and
-            climate risk, then post the run to the leaderboard.
+            Plan an annual AI infrastructure campaign from 2022 to 2030. Balance
+            compute, power, cooling, water, people support, and political
+            support before demand outruns the buildout.
           </p>
           <div className="home-actions" aria-label="Home actions">
             <Link className="primary-action" to="/play">
@@ -144,12 +146,12 @@ function HomePage() {
               <strong>{bestScore}</strong>
             </div>
             <div>
-              <span>Build slots</span>
-              <strong>{MAX_BUILDS}</strong>
+              <span>Campaign</span>
+              <strong>2022-2030</strong>
             </div>
             <div>
-              <span>Pace</span>
-              <strong>Month/Qtr</strong>
+              <span>Markets</span>
+              <strong>{DATA_CENTER_SITES.length}</strong>
             </div>
           </div>
           <InfrastructureStack builtCount={MAX_BUILDS} compact />
@@ -220,47 +222,21 @@ function InfrastructureStack({
 function SitePanel({
   state,
   setState,
-  mode,
 }: {
   state: GameState;
   setState: React.Dispatch<React.SetStateAction<GameState>>;
-  mode: ReturnType<typeof getGameMode>;
 }) {
   const selectedSite = DATA_CENTER_SITES.find(
     (site) => site.id === state.selectedSiteId,
   )!;
-  const score = calculateScore(state.builtSiteIds, state.missedPeriods);
-  const affordable = getAffordableSites(state);
   const builtSet = new Set(state.builtSiteIds);
-  const canBuild = canBuildSite(state, selectedSite.id);
-  const nextAsset = infrastructureAsset(state.builtSiteIds.length);
-
-  const buildSelected = () => {
-    setState((current) => {
-      const next = buildSite(current, current.selectedSiteId, mode);
-      if (next === current) return current;
-      return { ...next, selectedSiteId: selectNextCandidate(next) };
-    });
-  };
+  const asset = infrastructureAsset(state.builtSiteIds.length);
 
   return (
-    <aside className="decision-panel" aria-label="Site decision panel">
+    <aside className="decision-panel" aria-label="Market decision panel">
       <div className="turn-strip">
-        <span>
-          {mode.shortLabel} {Math.min(state.turn, mode.maxPeriods)} of{" "}
-          {mode.maxPeriods}
-        </span>
-        <small>
-          {state.builtSiteIds.length}/{MAX_BUILDS} builds
-        </small>
-        <button
-          className="ghost-button"
-          type="button"
-          onClick={() => setState(restartRun())}
-        >
-          <RotateCcw size={16} />
-          Restart
-        </button>
+        <span>Market for regional cards</span>
+        <small>{state.builtSiteIds.length} active sites</small>
       </div>
 
       <div className="selected-site">
@@ -272,17 +248,13 @@ function SitePanel({
               <span>{selectedSite.state}</span>
             </h2>
           </div>
-          <img src={nextAsset.src} alt="" aria-hidden="true" />
+          <img src={asset.src} alt="" aria-hidden="true" />
         </div>
         <p>{selectedSite.note}</p>
         <div className="site-metrics">
-          <span>Build {formatBudget(selectedSite.capex)}</span>
-          <span>{selectedSite.capacity} MW</span>
           <span>{selectedSite.region}</span>
-        </div>
-        <div className="next-build-strip">
-          <span>Build profile</span>
-          <strong>{nextAsset.name}</strong>
+          <span>{selectedSite.capacity} legacy MW</span>
+          <span>{selectedSite.waterSecurity} water</span>
         </div>
       </div>
 
@@ -312,28 +284,11 @@ function SitePanel({
         />
       </div>
 
-      <button
-        className="build-button"
-        type="button"
-        disabled={!canBuild}
-        onClick={buildSelected}
-      >
-        {builtSet.has(selectedSite.id)
-          ? "Already built"
-          : selectedSite.capex > score.budgetRemaining
-            ? "Insufficient budget"
-            : "Build this site"}
-        <ChevronRight size={18} />
-      </button>
-
       <div className="site-list" aria-label="Candidate markets">
         {DATA_CENTER_SITES.map((site, index) => {
           const isBuilt = builtSet.has(site.id);
           const isSelected = site.id === selectedSite.id;
-          const isAffordable = affordable.some(
-            (candidate) => candidate.id === site.id,
-          );
-          const asset = infrastructureAsset(index);
+          const siteAsset = infrastructureAsset(index);
 
           return (
             <button
@@ -351,7 +306,7 @@ function SitePanel({
               <span className="site-list-main">
                 <img
                   className="site-list-thumb"
-                  src={asset.src}
+                  src={siteAsset.src}
                   alt=""
                   aria-hidden="true"
                 />
@@ -360,13 +315,7 @@ function SitePanel({
                   <small>{site.state}</small>
                 </span>
               </span>
-              <strong>
-                {isBuilt
-                  ? "Built"
-                  : isAffordable
-                    ? formatBudget(site.capex)
-                    : "Locked"}
-              </strong>
+              <strong>{isBuilt ? "Built" : "Select"}</strong>
             </button>
           );
         })}
@@ -375,13 +324,294 @@ function SitePanel({
   );
 }
 
-function RunSummary({
+function categoryIcon(card: ActionCard) {
+  if (card.category === "compute") return <Factory size={17} />;
+  if (card.category === "power") return <Zap size={17} />;
+  if (card.category === "cooling") return <Gauge size={17} />;
+  if (card.category === "water") return <Waves size={17} />;
+  if (card.category === "politics") return <Landmark size={17} />;
+  return <Flag size={17} />;
+}
+
+function ActionCardGrid({
   state,
-  onResume,
+  setState,
+}: {
+  state: GameState;
+  setState: React.Dispatch<React.SetStateAction<GameState>>;
+}) {
+  const recommended = getRecommendedActionIds(state);
+  const budgetRemaining = getBudgetRemaining(state);
+
+  return (
+    <section className="action-card-grid" aria-label="Annual action cards">
+      {ACTION_CARDS.map((card) => {
+        const selected = state.selectedActionIds.includes(card.id);
+        const locked = state.year < card.availableYear;
+        const disabled =
+          state.phase !== "planning" ||
+          selected ||
+          locked ||
+          budgetRemaining < card.cost;
+        const isRecommended = recommended.has(card.id);
+
+        return (
+          <button
+            key={card.id}
+            type="button"
+            disabled={disabled}
+            className={[
+              "action-card",
+              selected ? "action-card--selected" : "",
+              isRecommended ? "action-card--recommended" : "",
+            ].join(" ")}
+            onClick={() =>
+              setState((current) => selectAction(current, card.id))
+            }
+          >
+            <span className="action-card__topline">
+              <span>{categoryIcon(card)}</span>
+              <b>{formatBudget(card.cost)}</b>
+            </span>
+            <strong>{card.title}</strong>
+            <small>
+              {locked
+                ? `Unlocks ${card.availableYear}`
+                : `${card.durationYears === 0 ? "Instant" : `${card.durationYears} year`} · ${
+                    card.requiresSite ? "uses selected market" : "national"
+                  }`}
+            </small>
+            <p>{card.benefitText}</p>
+            <em>{card.riskText}</em>
+            {isRecommended && (
+              <span className="recommended-chip">Recommended</span>
+            )}
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
+function AnnualPlanTray({
+  state,
+  setState,
+}: {
+  state: GameState;
+  setState: React.Dispatch<React.SetStateAction<GameState>>;
+}) {
+  const planned = state.projects.filter(
+    (project) => project.selectedYear === state.year,
+  );
+  const queued = state.projects.filter(
+    (project) => project.selectedYear < state.year,
+  );
+
+  return (
+    <section className="plan-grid">
+      <div className="annual-plan-tray">
+        <div className="panel-heading">
+          <p className="eyebrow">Annual plan</p>
+          <h2>{planned.length} selected</h2>
+        </div>
+        {planned.length === 0 ? (
+          <p className="empty-copy">Choose cards above to fund this year.</p>
+        ) : (
+          planned.map((project) => {
+            const card = findAction(project.cardId);
+            const site = project.siteId
+              ? DATA_CENTER_SITES.find(
+                  (candidate) => candidate.id === project.siteId,
+                )
+              : null;
+            return (
+              <button
+                key={project.id}
+                type="button"
+                className="plan-chip"
+                onClick={() =>
+                  setState((current) => removeAction(current, project.id))
+                }
+              >
+                <span>
+                  <b>{card.shortTitle}</b>
+                  <small>{site ? site.metro : "National"}</small>
+                </span>
+                <strong>{formatBudget(card.cost)}</strong>
+              </button>
+            );
+          })
+        )}
+      </div>
+
+      <div className="build-queue">
+        <div className="panel-heading">
+          <p className="eyebrow">Build queue</p>
+          <h2>{queued.length} pending</h2>
+        </div>
+        {queued.length === 0 ? (
+          <p className="empty-copy">
+            Longer builds will appear here until ready.
+          </p>
+        ) : (
+          queued.map((project) => {
+            const card = findAction(project.cardId);
+            return (
+              <div key={project.id} className="queue-row">
+                <span>{card.title}</span>
+                <strong>{project.readyYear}</strong>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AdvisorPanel({ state }: { state: GameState }) {
+  const supply = getSupplySummary(state);
+
+  return (
+    <section className="advisor-panel">
+      <div className="panel-heading">
+        <p className="eyebrow">Annual briefing</p>
+        <h2>{supply.mainBottleneck}</h2>
+      </div>
+      <p>
+        Demand this year is {formatLargeNumber(supply.demand.h100e)} H100e and{" "}
+        {formatLargeNumber(supply.demand.powerMW)} MW. Recommended cards are
+        based on the lowest coverage or support score.
+      </p>
+      <div className="support-breakdown">
+        <span>People {supply.peopleSupport}</span>
+        <span>Political {supply.politicalSupport}</span>
+        <span>Emissions {state.emissionsIndex}</span>
+      </div>
+    </section>
+  );
+}
+
+function TurnReportModal({
+  state,
+  onContinue,
+  onReviewFinal,
   onRestart,
 }: {
   state: GameState;
-  onResume: () => void;
+  onContinue: () => void;
+  onReviewFinal: () => void;
+  onRestart: () => void;
+}) {
+  const report = state.report;
+  if (!report) return null;
+  const final = state.phase === "finished";
+
+  return (
+    <div className="summary-overlay">
+      <section
+        className="turn-report"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Year-end report"
+      >
+        <div className="panel-heading">
+          <p className="eyebrow">{report.year} year-end report</p>
+          <h2>{final ? getRunOutcome(state).title : report.summary}</h2>
+        </div>
+        <div className="turn-report-grid">
+          <article>
+            <h3>Coverage deltas</h3>
+            <span>
+              Compute {report.metricDeltas.computeCoverage >= 0 ? "+" : ""}
+              {report.metricDeltas.computeCoverage}
+            </span>
+            <span>
+              Power {report.metricDeltas.powerCoverage >= 0 ? "+" : ""}
+              {report.metricDeltas.powerCoverage}
+            </span>
+            <span>
+              Cooling {report.metricDeltas.coolingCoverage >= 0 ? "+" : ""}
+              {report.metricDeltas.coolingCoverage}
+            </span>
+            <span>
+              Water {report.metricDeltas.waterCoverage >= 0 ? "+" : ""}
+              {report.metricDeltas.waterCoverage}
+            </span>
+          </article>
+          <article>
+            <h3>Support deltas</h3>
+            <span>
+              People {report.metricDeltas.peopleSupport >= 0 ? "+" : ""}
+              {report.metricDeltas.peopleSupport}
+            </span>
+            <span>
+              Political {report.metricDeltas.politicalSupport >= 0 ? "+" : ""}
+              {report.metricDeltas.politicalSupport}
+            </span>
+          </article>
+        </div>
+        <div className="headline-list">
+          {report.completedProjects.length > 0 && (
+            <p>
+              <b>Completed:</b> {report.completedProjects.join(", ")}
+            </p>
+          )}
+          {report.headlines.map((headline) => (
+            <p key={headline}>{headline}</p>
+          ))}
+          {report.warnings.map((warning) => (
+            <p key={warning} className="warning-copy">
+              {warning}
+            </p>
+          ))}
+          {report.advisorTips.map((tip) => (
+            <p key={tip}>
+              <b>Advisor:</b> {tip}
+            </p>
+          ))}
+        </div>
+        <div className="summary-actions">
+          {final ? (
+            <>
+              <button
+                className="primary-action"
+                type="button"
+                onClick={onReviewFinal}
+              >
+                <Trophy size={18} />
+                Review final score
+              </button>
+              <button
+                className="ghost-button"
+                type="button"
+                onClick={onRestart}
+              >
+                <RotateCcw size={18} />
+                New campaign
+              </button>
+            </>
+          ) : (
+            <button
+              className="primary-action"
+              type="button"
+              onClick={onContinue}
+            >
+              <ChevronRight size={18} />
+              Continue to {state.year + 1}
+            </button>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RunSummary({
+  state,
+  onRestart,
+}: {
+  state: GameState;
   onRestart: () => void;
 }) {
   const navigate = useNavigate();
@@ -389,7 +619,7 @@ function RunSummary({
   const [playerName, setPlayerName] = useState("");
   const [saved, setSaved] = useState(false);
   const builtSites = getBuiltSites(state);
-  const score = calculateScore(state.builtSiteIds, state.missedPeriods);
+  const score = calculateScore(state);
   const outcome = getRunOutcome(state);
 
   const saveRun = () => {
@@ -414,8 +644,8 @@ function RunSummary({
         <h2>{score.score}</h2>
         <p>
           {builtSites.length} {builtSites.length === 1 ? "market" : "markets"},{" "}
-          {score.capacity} MW, {score.demandCoverage}% demand coverage.{" "}
-          {outcome.description}
+          {formatLargeNumber(score.capacity)} MW supply, {score.demandCoverage}%
+          blended coverage. {outcome.description}
         </p>
       </div>
       <div className="summary-metrics">
@@ -427,16 +657,16 @@ function RunSummary({
         <MetricCard
           icon={<Zap size={16} />}
           label="Latency"
-          value={score.avgLatency}
+          value={score.avgLatency || "-"}
         />
         <MetricCard
           asset={generatedAssets.labels.water}
-          label="Water"
-          value={score.avgWaterSecurity}
+          label="Coverage"
+          value={`${score.demandCoverage}%`}
         />
         <MetricCard
           asset={generatedAssets.labels.budget}
-          label="Budget left"
+          label="Year budget"
           value={formatBudget(score.budgetRemaining)}
         />
       </div>
@@ -467,29 +697,14 @@ function RunSummary({
           Leaderboard
         </button>
         <button className="ghost-button" type="button" onClick={onRestart}>
-          New run
+          New campaign
         </button>
-        {!state.isFinished && (
-          <button className="ghost-button" type="button" onClick={onResume}>
-            Resume
-          </button>
-        )}
       </div>
     </div>
   );
 }
 
-function OnboardingOverlay({
-  modeId,
-  onModeChange,
-  onStart,
-}: {
-  modeId: GameModeId;
-  onModeChange: (modeId: GameModeId) => void;
-  onStart: () => void;
-}) {
-  const selectedMode = getGameMode(modeId);
-
+function OnboardingOverlay({ onStart }: { onStart: () => void }) {
   return (
     <div className="summary-overlay">
       <section
@@ -502,65 +717,38 @@ function OnboardingOverlay({
           <BookOpen size={18} />
           Tutorial
         </div>
-        <h2>Plan the footprint before the market moves past you.</h2>
-        <div className="mode-picker" aria-label="Game pace">
-          {GAME_MODES.map((mode) => (
-            <button
-              key={mode.id}
-              type="button"
-              className={
-                mode.id === modeId
-                  ? "mode-option mode-option--active"
-                  : "mode-option"
-              }
-              onClick={() => onModeChange(mode.id)}
-            >
-              <strong>{mode.label}</strong>
-              <span>
-                {mode.maxPeriods} {mode.shortLabel.toLowerCase()}s,{" "}
-                {formatClock(mode.secondsPerPeriod)} each
-              </span>
-              <small>{mode.description}</small>
-            </button>
-          ))}
-        </div>
+        <h2>Build the AI footprint without losing the coalition.</h2>
         <button
           className="primary-action tutorial-start"
           type="button"
           onClick={onStart}
         >
-          <Clock3 size={18} />
-          Start {selectedMode.shortLabel.toLowerCase()} clock
+          <CheckCircle2 size={18} />
+          Start 2022 plan
         </button>
         <div className="tutorial-grid">
           <article>
             <span>1</span>
-            <h3>Pick markets</h3>
+            <h3>Pick a market</h3>
             <p>
-              Click real US candidate markets on the atlas. Each build spends
-              budget and adds MW, latency reach, clean power, water security,
-              and resilience.
+              The map sets the selected market for regional cards such as
+              campuses, grid interconnects, water reuse, and benefits packages.
             </p>
           </article>
           <article>
             <span>2</span>
-            <h3>Watch the clock</h3>
+            <h3>Fund cards</h3>
             <p>
-              After this screen, each {selectedMode.shortLabel.toLowerCase()}{" "}
-              advances automatically every{" "}
-              {formatClock(selectedMode.secondsPerPeriod)}. If the timer
-              expires, that window is missed and your final score takes a
-              penalty.
+              Each year has its own budget. Recommended cards target the current
+              bottleneck, but every card has a tradeoff.
             </p>
           </article>
           <article>
             <span>3</span>
-            <h3>Win or lose</h3>
+            <h3>Read reports</h3>
             <p>
-              Win by finishing with {MAX_BUILDS} builds, at least {WIN_SCORE}{" "}
-              points, and {MIN_DEMAND_TO_WIN}% demand coverage. Lose if the
-              planning window closes below either threshold or you strand the
-              budget.
+              Reports explain completed projects, support swings, warnings, and
+              the next bottleneck before the campaign moves forward.
             </p>
           </article>
         </div>
@@ -573,74 +761,59 @@ function PlayPage() {
   const [state, setState] = useState<GameState>(initialGameState);
   const [showSummary, setShowSummary] = useState(false);
   const [tutorialOpen, setTutorialOpen] = useState(true);
-  const [modeId, setModeId] = useState<GameModeId>(DEFAULT_GAME_MODE_ID);
-  const mode = getGameMode(modeId);
-  const [secondsLeft, setSecondsLeft] = useState(mode.secondsPerPeriod);
-  const score = calculateScore(state.builtSiteIds, state.missedPeriods);
+  const supply = getSupplySummary(state);
   const builtSites = getBuiltSites(state);
-  const displaySummary = showSummary || state.isFinished;
-  const timerActive = !tutorialOpen && !displaySummary;
-  const currentPeriodLabel = getCurrentPeriodLabel(state, mode);
-
-  useEffect(() => {
-    setSecondsLeft(mode.secondsPerPeriod);
-  }, [mode.secondsPerPeriod, state.turn]);
-
-  useEffect(() => {
-    if (!timerActive) return undefined;
-
-    const id = window.setInterval(() => {
-      setSecondsLeft((current) => {
-        if (current <= 1) {
-          setState((existing) => advancePeriod(existing, mode));
-          return mode.secondsPerPeriod;
-        }
-        return current - 1;
-      });
-    }, 1000);
-
-    return () => window.clearInterval(id);
-  }, [mode, timerActive]);
-
-  const finish = () => {
-    setState((current) => finishRun(current));
-    setShowSummary(true);
-  };
+  const budgetRemaining = getBudgetRemaining(state);
+  const annualBudget = getAnnualBudget(state.year);
+  const plannedCost = getPlannedCost(state);
+  const score = calculateScore(state);
+  const displaySummary =
+    showSummary || (state.phase === "finished" && !state.report);
 
   const restart = () => {
     setState(restartRun());
     setShowSummary(false);
     setTutorialOpen(true);
-    setSecondsLeft(mode.secondsPerPeriod);
   };
 
-  const manuallyAdvancePeriod = () => {
-    setState((current) => advancePeriod(current, mode));
-    setSecondsLeft(mode.secondsPerPeriod);
+  const runPlan = () => {
+    setState((current) => runAnnualPlan(current));
   };
 
-  const progress = Math.round(
-    (Math.min(state.turn - 1, mode.maxPeriods) / mode.maxPeriods) * 100,
-  );
+  const continueReport = () => {
+    setState((current) => continueFromReport(current));
+  };
+
+  const reviewFinalScore = () => {
+    setState((current) => ({ ...current, report: null }));
+    setShowSummary(true);
+  };
 
   return (
     <main className="play-page">
       <section className="game-header">
         <div>
           <p className="eyebrow">Operator console</p>
-          <h1>Build a national AI compute footprint</h1>
+          <h1>Plan the {getCurrentPeriodLabel(state)} AI buildout</h1>
         </div>
         <div className="run-controls">
-          <button
-            className="ghost-button"
-            type="button"
-            onClick={manuallyAdvancePeriod}
-          >
-            <Clock3 size={16} />
-            Advance {mode.shortLabel.toLowerCase()}
+          <button className="ghost-button" type="button" onClick={restart}>
+            <RotateCcw size={16} />
+            New run
           </button>
-          <button className="secondary-action" type="button" onClick={finish}>
-            End run
+          <button
+            className="primary-action"
+            type="button"
+            onClick={runPlan}
+            disabled={
+              state.phase !== "planning" ||
+              state.projects.filter(
+                (project) => project.selectedYear === state.year,
+              ).length === 0
+            }
+          >
+            <Play size={16} />
+            Run annual plan
           </button>
         </div>
       </section>
@@ -648,48 +821,62 @@ function PlayPage() {
       <section className="score-band" aria-label="Run metrics">
         <MetricCard
           asset={generatedAssets.labels.year}
-          label={`${currentPeriodLabel} clock`}
-          value={formatClock(secondsLeft)}
-        />
-        <MetricCard
-          icon={<MapPin size={16} />}
-          label="Builds"
-          value={`${builtSites.length}/${MAX_BUILDS}`}
-        />
-        <MetricCard
-          asset={generatedAssets.labels.leaderboard}
-          label="Score"
-          value={score.score}
+          label="Year"
+          value={`${state.year}/${END_YEAR}`}
         />
         <MetricCard
           asset={generatedAssets.labels.budget}
           label="Budget"
-          value={formatBudget(score.budgetRemaining)}
-          tone={score.budgetRemaining < 20 ? "warning" : undefined}
+          value={`${formatBudget(budgetRemaining)} / ${formatBudget(annualBudget)}`}
+          tone={budgetRemaining <= 2 ? "warning" : undefined}
         />
         <MetricCard
           asset={generatedAssets.labels.demand}
-          label="Demand"
-          value={`${score.demandCoverage}%`}
+          label="Compute"
+          value={`${supply.computeCoverage}%`}
+          tone={supply.computeCoverage < 65 ? "warning" : undefined}
         />
         <MetricCard
           asset={generatedAssets.labels.power}
-          label="Clean power"
-          value={score.avgCleanPower || "-"}
+          label="Power"
+          value={`${supply.powerCoverage}%`}
+          tone={supply.powerCoverage < 65 ? "warning" : undefined}
+        />
+        <MetricCard
+          icon={<Waves size={16} />}
+          label="Water"
+          value={`${supply.waterCoverage}%`}
+          tone={supply.waterCoverage < 65 ? "warning" : undefined}
+        />
+        <MetricCard
+          icon={<Landmark size={16} />}
+          label="Support"
+          value={`${supply.peopleSupport}/${supply.politicalSupport}`}
+          tone={
+            supply.peopleSupport < 45 || supply.politicalSupport < 45
+              ? "warning"
+              : undefined
+          }
         />
       </section>
 
-      <div className="turn-progress" aria-label="Turn progress">
-        <span style={{ width: `${progress}%` }} />
+      <div className="budget-meter" aria-label="Annual budget used">
+        <span
+          style={{
+            width: `${Math.min(100, (plannedCost / annualBudget) * 100)}%`,
+          }}
+        />
       </div>
-      <InfrastructureStack builtCount={builtSites.length} />
+      <InfrastructureStack
+        builtCount={Math.min(builtSites.length, MAX_BUILDS)}
+      />
 
       <section className="game-layout">
         <div className="map-stage">
           <div className="map-topline">
             <div>
               <p className="eyebrow">US atlas</p>
-              <h2>Click a market on the map</h2>
+              <h2>Choose a market, then fund cards</h2>
             </div>
             <span>{builtSites.length} built</span>
           </div>
@@ -700,30 +887,38 @@ function PlayPage() {
               setState((current) => ({ ...current, selectedSiteId: siteId }))
             }
           />
+          <AdvisorPanel state={state} />
         </div>
-        <SitePanel state={state} setState={setState} mode={mode} />
+        <SitePanel state={state} setState={setState} />
       </section>
 
+      <ActionCardGrid state={state} setState={setState} />
+      <AnnualPlanTray state={state} setState={setState} />
+
+      <section className="score-footer">
+        <span>Current score projection</span>
+        <strong>{score.score}</strong>
+        <span>
+          Win target: {WIN_SCORE} and {MIN_DEMAND_TO_WIN}% final compute
+          coverage
+        </span>
+      </section>
+
+      {state.report && (
+        <TurnReportModal
+          state={state}
+          onContinue={continueReport}
+          onReviewFinal={reviewFinalScore}
+          onRestart={restart}
+        />
+      )}
       {displaySummary && (
         <div className="summary-overlay">
-          <RunSummary
-            state={state}
-            onResume={() => setShowSummary(false)}
-            onRestart={restart}
-          />
+          <RunSummary state={state} onRestart={restart} />
         </div>
       )}
       {tutorialOpen && (
-        <OnboardingOverlay
-          modeId={modeId}
-          onModeChange={(nextModeId) => {
-            setModeId(nextModeId);
-            setState(restartRun());
-            setShowSummary(false);
-            setSecondsLeft(getGameMode(nextModeId).secondsPerPeriod);
-          }}
-          onStart={() => setTutorialOpen(false)}
-        />
+        <OnboardingOverlay onStart={() => setTutorialOpen(false)} />
       )}
     </main>
   );
@@ -756,7 +951,7 @@ function LeaderboardPage() {
             <div className="rank-badge">{index + 1}</div>
             <div className="leaderboard-main">
               <h2>{entry.playerName}</h2>
-              <p>{entry.sites.join(" / ")}</p>
+              <p>{entry.sites.join(" / ") || "No markets completed"}</p>
             </div>
             <div className="leaderboard-stats">
               <span>
@@ -764,12 +959,12 @@ function LeaderboardPage() {
                 score
               </span>
               <span>
-                <strong>{entry.capacity}</strong>
+                <strong>{formatLargeNumber(entry.capacity)}</strong>
                 MW
               </span>
               <span>
                 <strong>{entry.demandCoverage}%</strong>
-                demand
+                coverage
               </span>
               <span>
                 <strong>{formatBudget(entry.budgetRemaining)}</strong>
