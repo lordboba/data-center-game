@@ -44,11 +44,14 @@ import {
   formatLargeNumber,
   GameState,
   getActionLockReason,
+  getActiveModifiers,
   getAnnualBudget,
   getBudgetRemaining,
   getBuiltSites,
+  getCommittedBuildUnits,
   getCurrentPeriodLabel,
   getDynamicActionCost,
+  getInflationMultiplier,
   getPlannedCost,
   getPeriodLabel,
   getRecommendedActionIds,
@@ -59,6 +62,7 @@ import {
   getVisibleMetrics,
   initialGameState,
   removeAction,
+  resolveRandomEventChoice,
   restartRun,
   runAnnualPlan,
   selectAction,
@@ -258,15 +262,19 @@ function InfrastructureStack({
   builtCount: number;
   compact?: boolean;
 }) {
+  const slots = Array.from({ length: MAX_BUILDS }, (_, index) =>
+    infrastructureAsset(index),
+  );
+
   return (
     <section
       className={compact ? "build-stack build-stack--compact" : "build-stack"}
       aria-label="Infrastructure build stack"
     >
-      {generatedAssets.infrastructure.map((asset, index) => (
+      {slots.map((asset, index) => (
         <div
           className={`build-stack__item ${index < builtCount ? "build-stack__item--active" : ""}`}
-          key={asset.name}
+          key={`${asset.name}-${index}`}
         >
           <img src={asset.src} alt="" aria-hidden="true" />
           <span>{asset.name}</span>
@@ -666,6 +674,10 @@ function AdvisorPanel({
 }) {
   const supply = getSupplySummary(state);
   const visibleMetrics = getVisibleMetrics(state);
+  const activeModifiers = getActiveModifiers(state);
+  const inflationPercent = Math.round(
+    (getInflationMultiplier(state) - 1) * 100,
+  );
 
   return (
     <section
@@ -692,8 +704,15 @@ function AdvisorPanel({
         {visibleMetrics.has("politicalSupport") && (
           <span>Political {supply.politicalSupport}</span>
         )}
+        <span>
+          Builds {getCommittedBuildUnits(state)}/{MAX_BUILDS}
+        </span>
+        <span>Inflation +{inflationPercent}%</span>
         <span>Emissions {state.emissionsIndex}</span>
         <span>Outlook {state.outlook}</span>
+        {activeModifiers.map((modifier) => (
+          <span key={modifier.id}>{modifier.label}</span>
+        ))}
       </div>
     </section>
   );
@@ -702,11 +721,13 @@ function AdvisorPanel({
 function TurnReportModal({
   state,
   onContinue,
+  onResolveEvent,
   onReviewFinal,
   onRestart,
 }: {
   state: GameState;
   onContinue: () => void;
+  onResolveEvent: (choiceId: string) => void;
   onReviewFinal: () => void;
   onRestart: () => void;
 }) {
@@ -714,6 +735,9 @@ function TurnReportModal({
   if (!report) return null;
   const final = state.phase === "finished";
   const visibleMetrics = getVisibleMetrics(state);
+  const pendingEvent = state.pendingEvent;
+  const eventRequiresResponse =
+    Boolean(pendingEvent) && !pendingEvent?.resolvedChoiceId;
 
   return (
     <div className="summary-overlay">
@@ -774,6 +798,39 @@ function TurnReportModal({
             </span>
           </article>
         </div>
+        {pendingEvent && (
+          <section className="random-event-panel">
+            <div>
+              <p className="eyebrow">
+                {pendingEvent.family.replace("-", " ")} /{" "}
+                {pendingEvent.severity} risk
+              </p>
+              <h3>{pendingEvent.title}</h3>
+              <p>{pendingEvent.prompt}</p>
+            </div>
+            {pendingEvent.outcomeSummary ? (
+              <p className="random-event-outcome">
+                <b>Outcome:</b> {pendingEvent.outcomeSummary}
+              </p>
+            ) : (
+              <div className="random-event-actions">
+                {pendingEvent.choices.map((choice) => (
+                  <button
+                    key={choice.id}
+                    className="secondary-action"
+                    type="button"
+                    onClick={() => onResolveEvent(choice.id)}
+                  >
+                    <span>
+                      <b>{choice.label}</b>
+                      <small>{choice.body}</small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+        )}
         <div className="headline-list">
           {report.completedProjects.length > 0 && (
             <p>
@@ -819,6 +876,7 @@ function TurnReportModal({
               className="primary-action"
               type="button"
               onClick={onContinue}
+              disabled={eventRequiresResponse}
             >
               <ChevronRight size={18} />
               Continue to{" "}
@@ -1056,11 +1114,14 @@ function PlayPage() {
     null,
   );
   const supply = getSupplySummary(state);
-  const builtSites = getBuiltSites(state);
   const selectableSites = getSelectableSites(state);
   const budgetRemaining = getBudgetRemaining(state);
   const annualBudget = getAnnualBudget(state);
   const plannedCost = getPlannedCost(state);
+  const committedBuildUnits = getCommittedBuildUnits(state);
+  const inflationPercent = Math.round(
+    (getInflationMultiplier(state) - 1) * 100,
+  );
   const score = calculateScore(state);
   const visibleMetrics = getVisibleMetrics(state);
   const pendingTutorialSteps = useMemo(
@@ -1101,6 +1162,10 @@ function PlayPage() {
 
   const continueReport = () => {
     setState((current) => continueFromReport(current));
+  };
+
+  const resolveEvent = (choiceId: string) => {
+    setState((current) => resolveRandomEventChoice(current, choiceId));
   };
 
   const reviewFinalScore = () => {
@@ -1216,6 +1281,20 @@ function PlayPage() {
           warningText="Weak outlook tightens next-period budget and project pricing."
         />
         <MetricCard
+          icon={<TriangleAlert size={16} />}
+          label="Inflation"
+          value={`+${inflationPercent}%`}
+          tone={inflationPercent >= 45 ? "warning" : undefined}
+          warningText="Inflation compounds by year and active crises can raise project prices further."
+        />
+        <MetricCard
+          icon={<Building2 size={16} />}
+          label="Builds"
+          value={`${committedBuildUnits}/${MAX_BUILDS}`}
+          tone={committedBuildUnits >= MAX_BUILDS ? "warning" : undefined}
+          warningText="Completed and queued campuses and expansions count toward the build cap."
+        />
+        <MetricCard
           asset={generatedAssets.labels.demand}
           label="Compute"
           value={`${supply.computeCoverage}%`}
@@ -1283,7 +1362,7 @@ function PlayPage() {
         />
       </div>
       <InfrastructureStack
-        builtCount={Math.min(builtSites.length, MAX_BUILDS)}
+        builtCount={Math.min(committedBuildUnits, MAX_BUILDS)}
       />
 
       <section className="play-dashboard">
@@ -1293,7 +1372,9 @@ function PlayPage() {
               <p className="eyebrow">US atlas</p>
               <h2>Available slate: {selectableSites.length} markets</h2>
             </div>
-            <span>{builtSites.length} built</span>
+            <span>
+              {committedBuildUnits}/{MAX_BUILDS} committed
+            </span>
           </div>
           <UnitedStatesMap
             builtSiteIds={state.builtSiteIds}
@@ -1352,6 +1433,7 @@ function PlayPage() {
       {state.report && (
         <TurnReportModal
           state={state}
+          onResolveEvent={resolveEvent}
           onContinue={continueReport}
           onReviewFinal={reviewFinalScore}
           onRestart={restart}

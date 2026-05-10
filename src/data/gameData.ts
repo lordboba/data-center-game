@@ -1,4 +1,4 @@
-export const MAX_BUILDS = 6;
+export const MAX_BUILDS = 14;
 export const STARTING_BUDGET = 120;
 export const START_YEAR = 2022;
 export const END_YEAR = 2030;

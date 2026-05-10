@@ -11,6 +11,7 @@ import {
   GameMode,
   GameModeId,
   GAME_MODES,
+  MAX_BUILDS,
   METRIC_FIRST_AVAILABLE_PERIODS,
   MIN_DEMAND_TO_WIN,
   REGION_TARGETS,
@@ -20,6 +21,15 @@ import {
   WIN_SCORE,
   UnlockStage,
 } from "../data/gameData";
+import {
+  RANDOM_EVENTS,
+  EventModifierTemplate,
+  EventRiskMetric,
+  EventSeverity,
+  RandomEventChoice,
+  RandomEventDefinition,
+  RandomEventOutcome,
+} from "../data/randomEvents";
 
 export type GamePhase = "planning" | "report" | "finished";
 export type GameOutcomeStatus = "active" | "won" | "lost";
@@ -49,6 +59,33 @@ export type PlannedAction = {
   cost: number;
 };
 
+export type ActiveGameModifier = {
+  id: string;
+  sourceEventId: string;
+  label: string;
+  description: string;
+  costMultiplier: number;
+  endsAtPeriodIndex: number;
+};
+
+export type PendingRandomEventChoice = Pick<
+  RandomEventChoice,
+  "id" | "label" | "body"
+>;
+
+export type PendingRandomEvent = {
+  id: string;
+  family: RandomEventDefinition["family"];
+  title: string;
+  prompt: string;
+  severity: EventSeverity;
+  periodIndex: number;
+  choices: PendingRandomEventChoice[];
+  resolvedChoiceId?: string;
+  resolvedOutcomeId?: string;
+  outcomeSummary?: string;
+};
+
 export type TurnReport = {
   periodIndex: number;
   year: number;
@@ -75,11 +112,17 @@ export type GameState = {
   phase: GamePhase;
   outcome: GameOutcomeStatus;
   builtSiteIds: string[];
+  completedExpansionCount: number;
   selectedSiteId: string;
   selectedActionIds: string[];
   completedTutorialIds: string[];
   projects: PlannedAction[];
   report: TurnReport | null;
+  rngSeed: number;
+  rngStep: number;
+  eventCooldownPeriods: number;
+  activeModifiers: ActiveGameModifier[];
+  pendingEvent: PendingRandomEvent | null;
   support: SupportState;
   infrastructure: InfrastructureState;
   emissionsIndex: number;
@@ -132,11 +175,17 @@ export const initialGameState: GameState = {
   phase: "planning",
   outcome: "active",
   builtSiteIds: [],
+  completedExpansionCount: 0,
   selectedSiteId: DATA_CENTER_SITES[0].id,
   selectedActionIds: [],
   completedTutorialIds: [],
   projects: [],
   report: null,
+  rngSeed: 20220510,
+  rngStep: 0,
+  eventCooldownPeriods: 1,
+  activeModifiers: [],
+  pendingEvent: null,
   support: {
     people: 68,
     political: 66,
@@ -178,6 +227,29 @@ function clamp(value: number, min = 0, max = 100): number {
 
 function projectId(): string {
   return `plan-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function createRunSeed(): number {
+  return Math.floor(
+    (Date.now() ^ Math.floor(Math.random() * 0xffffffff)) >>> 0,
+  );
+}
+
+function seededRandom(seed: number, step: number): number {
+  let value = (seed + Math.imul(step + 1, 0x6d2b79f5)) >>> 0;
+  value = Math.imul(value ^ (value >>> 15), value | 1);
+  value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+  return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+}
+
+function consumeRandom(state: Pick<GameState, "rngSeed" | "rngStep">): {
+  value: number;
+  rngStep: number;
+} {
+  return {
+    value: seededRandom(state.rngSeed, state.rngStep),
+    rngStep: state.rngStep + 1,
+  };
 }
 
 function stageRank(stage: UnlockStage): number {
@@ -394,6 +466,47 @@ export function getAnnualBudget(stateOrYear: GameState | number): number {
   return Math.max(2, base + stateOrYear.budgetBalance);
 }
 
+export function getActiveModifiers(state: GameState): ActiveGameModifier[] {
+  return state.activeModifiers.filter(
+    (modifier) => modifier.endsAtPeriodIndex >= state.periodIndex,
+  );
+}
+
+export function getInflationMultiplier(state: GameState): number {
+  const yearInflation = Math.pow(
+    1.1,
+    Math.max(0, getCurrentPeriod(state).year - START_YEAR),
+  );
+  const modifierMultiplier = getActiveModifiers(state).reduce(
+    (product, modifier) => product * modifier.costMultiplier,
+    1,
+  );
+  return yearInflation * modifierMultiplier;
+}
+
+function isBuildUnitCard(cardId: string): boolean {
+  return cardId === "hyperscale-campus" || cardId === "expand-campus";
+}
+
+export function getCommittedBuildUnits(state: GameState): number {
+  const queuedBuildUnits = state.projects.filter((project) =>
+    isBuildUnitCard(project.cardId),
+  ).length;
+  return (
+    state.builtSiteIds.length + state.completedExpansionCount + queuedBuildUnits
+  );
+}
+
+function hasCommittedCampusAtSite(state: GameState, siteId: string): boolean {
+  return (
+    state.builtSiteIds.includes(siteId) ||
+    state.projects.some(
+      (project) =>
+        project.cardId === "hyperscale-campus" && project.siteId === siteId,
+    )
+  );
+}
+
 export function getPlannedCost(state: GameState): number {
   return state.projects
     .filter((project) => project.selectedPeriodIndex === state.periodIndex)
@@ -427,7 +540,7 @@ export function getDynamicActionCost(
   card: ActionCard,
 ): number {
   const pressure = getCostPressureValue(state, card);
-  let cost = card.cost;
+  let cost = Math.ceil(card.cost * getInflationMultiplier(state));
 
   if (pressure >= 85) cost -= 1;
   if (pressure < 60) cost += 1;
@@ -465,6 +578,15 @@ export function getActionLockReason(
     !state.builtSiteIds.includes(state.selectedSiteId)
   ) {
     return "Build a campus here first";
+  }
+  if (
+    card.id === "hyperscale-campus" &&
+    hasCommittedCampusAtSite(state, state.selectedSiteId)
+  ) {
+    return "Campus already committed here";
+  }
+  if (isBuildUnitCard(card.id) && getCommittedBuildUnits(state) >= MAX_BUILDS) {
+    return `Build capacity is full (${MAX_BUILDS}/${MAX_BUILDS})`;
   }
 
   const supply = getSupplySummary(state);
@@ -696,6 +818,315 @@ function applySupportDelta(
   };
 }
 
+function getEventRiskValue(
+  state: GameState,
+  supply: SupplySummary,
+  metric: EventRiskMetric,
+): number {
+  if (metric === "peopleSupport") return supply.peopleSupport;
+  if (metric === "politicalSupport") return supply.politicalSupport;
+  if (metric === "powerCoverage") return supply.powerCoverage;
+  if (metric === "coolingCoverage") return supply.coolingCoverage;
+  if (metric === "waterCoverage") return supply.waterCoverage;
+  if (metric === "computeCoverage") return supply.computeCoverage;
+  if (metric === "outlook") return state.outlook;
+  if (metric === "emissionsIndex") return state.emissionsIndex;
+  if (metric === "builtUnits") return getCommittedBuildUnits(state);
+  if (metric === "laborSupport") return state.support.labor;
+  if (metric === "regulatorSupport") return state.support.regulator;
+  if (metric === "businessSupport") return state.support.business;
+  return 0;
+}
+
+function getEventSeverity(
+  event: RandomEventDefinition,
+  state: GameState,
+  supply = getSupplySummary(state),
+): EventSeverity {
+  if (!event.risk) return "medium";
+
+  const value = getEventRiskValue(state, supply, event.risk.metric);
+  if (event.risk.direction === "below") {
+    if (value <= event.risk.highAt) return "high";
+    if (value <= event.risk.mediumAt) return "medium";
+    return "low";
+  }
+
+  if (value >= event.risk.highAt) return "high";
+  if (value >= event.risk.mediumAt) return "medium";
+  return "low";
+}
+
+function severityWeightMultiplier(severity: EventSeverity): number {
+  if (severity === "high") return 1.5;
+  if (severity === "medium") return 1.1;
+  return 0.8;
+}
+
+function chooseWeighted<T>(
+  items: T[],
+  weightForItem: (item: T) => number,
+  roll: number,
+): T | null {
+  const total = items.reduce(
+    (sum, item) => sum + Math.max(0, weightForItem(item)),
+    0,
+  );
+  if (total <= 0) return null;
+
+  let cursor = roll * total;
+  for (const item of items) {
+    cursor -= Math.max(0, weightForItem(item));
+    if (cursor <= 0) return item;
+  }
+
+  return items[items.length - 1] ?? null;
+}
+
+function eventLocationLabel(state: GameState): string {
+  const selectedSite = findSite(state.selectedSiteId);
+  if (state.builtSiteIds.includes(selectedSite.id)) {
+    return `${selectedSite.metro}, ${selectedSite.state}`;
+  }
+
+  const firstBuiltSite = state.builtSiteIds[0]
+    ? findSite(state.builtSiteIds[0])
+    : selectedSite;
+  return `${firstBuiltSite.metro}, ${firstBuiltSite.state}`;
+}
+
+function eventVendorLabel(state: GameState): string {
+  const vendors = ["Microsoft", "Google", "Oracle", "Meta"];
+  return vendors[(state.rngSeed + state.periodIndex) % vendors.length];
+}
+
+function formatEventPrompt(
+  event: RandomEventDefinition,
+  state: GameState,
+): string {
+  const loanAmount = formatBudget(
+    Math.max(2, Math.ceil(getAnnualBudget(state) * 0.25)),
+  );
+  return event.promptTemplate
+    .replace(/\{location\}/g, eventLocationLabel(state))
+    .replace(/\{loanAmount\}/g, loanAmount)
+    .replace(/\{vendor\}/g, eventVendorLabel(state));
+}
+
+function toPendingEvent(
+  event: RandomEventDefinition,
+  state: GameState,
+  severity: EventSeverity,
+): PendingRandomEvent {
+  return {
+    id: event.id,
+    family: event.family,
+    title: event.title,
+    prompt: formatEventPrompt(event, state),
+    severity,
+    periodIndex: state.periodIndex,
+    choices: event.choices.map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      body: choice.body,
+    })),
+  };
+}
+
+export function rollRandomEventForTurn(state: GameState): GameState {
+  if (state.pendingEvent || state.eventCooldownPeriods > 0) return state;
+  if (state.periodIndex < 2) return state;
+
+  const chanceRoll = consumeRandom(state);
+  const eventChance = 0.28;
+  let rngStep = chanceRoll.rngStep;
+  if (chanceRoll.value > eventChance) {
+    return { ...state, rngStep };
+  }
+
+  const supply = getSupplySummary(state);
+  const eligibleEvents = RANDOM_EVENTS.filter(
+    (event) =>
+      state.periodIndex >= event.firstAvailablePeriod &&
+      (event.minBuiltUnits ?? 0) <= getCommittedBuildUnits(state),
+  );
+  if (eligibleEvents.length === 0) {
+    return { ...state, rngStep };
+  }
+
+  const eventRoll = seededRandom(state.rngSeed, rngStep);
+  rngStep += 1;
+  const selectedEvent = chooseWeighted(
+    eligibleEvents,
+    (event) =>
+      event.baseWeight *
+      severityWeightMultiplier(getEventSeverity(event, state, supply)),
+    eventRoll,
+  );
+  if (!selectedEvent) return { ...state, rngStep };
+
+  const severity = getEventSeverity(selectedEvent, state, supply);
+  return {
+    ...state,
+    rngStep,
+    eventCooldownPeriods: selectedEvent.cooldownPeriods ?? 2,
+    pendingEvent: toPendingEvent(selectedEvent, state, severity),
+  };
+}
+
+function createActiveModifier(
+  eventId: string,
+  outcomeId: string,
+  periodIndex: number,
+  template: EventModifierTemplate,
+): ActiveGameModifier {
+  return {
+    id: `${eventId}-${outcomeId}-${periodIndex}-${template.label.toLowerCase().replace(/\s+/g, "-")}`,
+    sourceEventId: eventId,
+    label: template.label,
+    description: template.description,
+    costMultiplier: template.costMultiplier,
+    endsAtPeriodIndex: periodIndex + template.durationPeriods,
+  };
+}
+
+function applyRandomEventEffects(
+  state: GameState,
+  eventId: string,
+  outcome: RandomEventOutcome,
+): GameState {
+  const applied = applyEffects(
+    state.infrastructure,
+    state.support,
+    state.emissionsIndex,
+    outcome.effects,
+  );
+  const modifiers = outcome.effects.modifiers ?? [];
+
+  return {
+    ...state,
+    infrastructure: applied.infrastructure,
+    support: applied.support,
+    emissionsIndex: applied.emissionsIndex,
+    outlook: clamp(state.outlook + (outcome.effects.outlook ?? 0)),
+    budgetBalance: state.budgetBalance + (outcome.effects.budgetBalance ?? 0),
+    eventCooldownPeriods: Math.max(
+      state.eventCooldownPeriods,
+      outcome.effects.eventCooldownPeriods ?? 0,
+    ),
+    activeModifiers: [
+      ...getActiveModifiers(state),
+      ...modifiers.map((modifier) =>
+        createActiveModifier(eventId, outcome.id, state.periodIndex, modifier),
+      ),
+    ],
+  };
+}
+
+function findRandomEventDefinition(eventId: string): RandomEventDefinition {
+  const event = RANDOM_EVENTS.find((candidate) => candidate.id === eventId);
+  if (!event) throw new Error(`Unknown random event: ${eventId}`);
+  return event;
+}
+
+export function getRandomEventSeverity(
+  eventId: string,
+  state: GameState,
+): EventSeverity {
+  return getEventSeverity(findRandomEventDefinition(eventId), state);
+}
+
+function findRandomEventChoice(
+  event: RandomEventDefinition,
+  choiceId: string,
+): RandomEventChoice {
+  const choice = event.choices.find((candidate) => candidate.id === choiceId);
+  if (!choice) {
+    throw new Error(`Unknown choice ${choiceId} for random event ${event.id}`);
+  }
+  return choice;
+}
+
+export function resolveRandomEventChoice(
+  state: GameState,
+  choiceId: string,
+): GameState {
+  const pendingEvent = state.pendingEvent;
+  if (!pendingEvent || pendingEvent.resolvedChoiceId) return state;
+
+  const event = findRandomEventDefinition(pendingEvent.id);
+  const choice = findRandomEventChoice(event, choiceId);
+  const outcomeRoll = consumeRandom(state);
+  const outcome = chooseWeighted(
+    choice.outcomes,
+    (candidate) => candidate.weightBySeverity[pendingEvent.severity],
+    outcomeRoll.value,
+  );
+  if (!outcome) return { ...state, rngStep: outcomeRoll.rngStep };
+
+  const before = getSupplySummary(state);
+  const beforeOutlook = state.outlook;
+  const nextState = applyRandomEventEffects(
+    { ...state, rngStep: outcomeRoll.rngStep },
+    event.id,
+    outcome,
+  );
+  const after = getSupplySummary(nextState);
+  const report = nextState.report
+    ? {
+        ...nextState.report,
+        headlines: [...nextState.report.headlines, outcome.summary],
+        metricDeltas: {
+          computeCoverage:
+            nextState.report.metricDeltas.computeCoverage +
+            after.computeCoverage -
+            before.computeCoverage,
+          powerCoverage:
+            nextState.report.metricDeltas.powerCoverage +
+            after.powerCoverage -
+            before.powerCoverage,
+          coolingCoverage:
+            nextState.report.metricDeltas.coolingCoverage +
+            after.coolingCoverage -
+            before.coolingCoverage,
+          waterCoverage:
+            nextState.report.metricDeltas.waterCoverage +
+            after.waterCoverage -
+            before.waterCoverage,
+          peopleSupport:
+            nextState.report.metricDeltas.peopleSupport +
+            after.peopleSupport -
+            before.peopleSupport,
+          politicalSupport:
+            nextState.report.metricDeltas.politicalSupport +
+            after.politicalSupport -
+            before.politicalSupport,
+          outlook:
+            nextState.report.metricDeltas.outlook +
+            nextState.outlook -
+            beforeOutlook,
+        },
+      }
+    : null;
+  const resolvedState = {
+    ...nextState,
+    pendingEvent: {
+      ...pendingEvent,
+      resolvedChoiceId: choice.id,
+      resolvedOutcomeId: outcome.id,
+      outcomeSummary: outcome.summary,
+    },
+    report,
+  };
+  const outcomeStatus = getOutcomeForState(resolvedState, after);
+
+  return {
+    ...resolvedState,
+    phase: outcomeStatus === "active" ? resolvedState.phase : "finished",
+    outcome: outcomeStatus,
+  };
+}
+
 export function getRecommendedActionIds(state: GameState): Set<string> {
   const supply = getSupplySummary(state);
   const recommended = new Set<string>();
@@ -776,6 +1207,7 @@ export function runAnnualPlan(state: GameState): GameState {
   let support = state.support;
   let emissionsIndex = state.emissionsIndex;
   const builtSiteIds = new Set(state.builtSiteIds);
+  let completedExpansionCount = state.completedExpansionCount;
 
   for (const project of completedNow) {
     const card = findAction(project.cardId);
@@ -793,21 +1225,26 @@ export function runAnnualPlan(state: GameState): GameState {
     if (card.id === "hyperscale-campus" && project.siteId) {
       builtSiteIds.add(project.siteId);
     }
+    if (card.id === "expand-campus") {
+      completedExpansionCount += 1;
+    }
   }
 
   const nextStateBase: GameState = {
     ...state,
     builtSiteIds: [...builtSiteIds],
+    completedExpansionCount,
     selectedActionIds: [],
     projects: stillQueued,
     infrastructure,
     support,
     emissionsIndex,
+    activeModifiers: getActiveModifiers(state),
   };
   const afterProjects = getSupplySummary(nextStateBase);
-  const event = eventEffects(nextStateBase, afterProjects);
-  support = applySupportDelta(nextStateBase.support, event.support);
-  emissionsIndex = event.emissionsIndex ?? emissionsIndex;
+  const conditionEvent = eventEffects(nextStateBase, afterProjects);
+  support = applySupportDelta(nextStateBase.support, conditionEvent.support);
+  emissionsIndex = conditionEvent.emissionsIndex ?? emissionsIndex;
 
   const eventState = { ...nextStateBase, support, emissionsIndex };
   const after = getSupplySummary(eventState);
@@ -877,8 +1314,8 @@ export function runAnnualPlan(state: GameState): GameState {
     summary: `${completedText} Main bottleneck: ${after.mainBottleneck}.`,
     completedProjects,
     headlines:
-      event.headlines.length > 0
-        ? event.headlines
+      conditionEvent.headlines.length > 0
+        ? conditionEvent.headlines
         : [
             "No major external shock this year; execution quality drove the outcome.",
           ],
@@ -895,12 +1332,16 @@ export function runAnnualPlan(state: GameState): GameState {
     },
   };
 
-  return {
+  const stateWithReport: GameState = {
     ...finalEventState,
     phase: outcome === "active" ? "report" : "finished",
     outcome,
     report,
   };
+
+  return outcome === "active"
+    ? rollRandomEventForTurn(stateWithReport)
+    : stateWithReport;
 }
 
 function getOutcomeForState(
@@ -933,6 +1374,7 @@ function getOutcomeForState(
 
 export function continueFromReport(state: GameState): GameState {
   if (state.phase !== "report") return state;
+  if (state.pendingEvent && !state.pendingEvent.resolvedChoiceId) return state;
 
   const nextPeriodIndex = state.periodIndex + 1;
   const nextPeriod = CAMPAIGN_PERIODS[nextPeriodIndex];
@@ -946,6 +1388,11 @@ export function continueFromReport(state: GameState): GameState {
     year: nextPeriod.year,
     phase: "planning",
     report: null,
+    pendingEvent: null,
+    eventCooldownPeriods: Math.max(0, state.eventCooldownPeriods - 1),
+    activeModifiers: state.activeModifiers.filter(
+      (modifier) => modifier.endsAtPeriodIndex >= nextPeriodIndex,
+    ),
   };
 }
 
@@ -957,9 +1404,15 @@ export function restartRun(): GameState {
   return {
     ...initialGameState,
     builtSiteIds: [...initialGameState.builtSiteIds],
+    completedExpansionCount: initialGameState.completedExpansionCount,
     selectedActionIds: [...initialGameState.selectedActionIds],
     completedTutorialIds: [...initialGameState.completedTutorialIds],
     projects: [...initialGameState.projects],
+    rngSeed: createRunSeed(),
+    rngStep: 0,
+    eventCooldownPeriods: initialGameState.eventCooldownPeriods,
+    activeModifiers: [...initialGameState.activeModifiers],
+    pendingEvent: null,
     support: { ...initialGameState.support },
     infrastructure: { ...initialGameState.infrastructure },
   };
