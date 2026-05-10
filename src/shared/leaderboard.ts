@@ -1,9 +1,12 @@
+import type { DifficultyId } from "../data/difficulty";
+
 export const LEADERBOARD_API_PATH = "/api/leaderboard";
 export const LEADERBOARD_DISPLAY_LIMIT = 12;
 
 export type LeaderboardEntry = {
   id: string;
   playerName: string;
+  difficultyId: DifficultyId;
   score: number;
   capacity: number;
   demandCoverage: number;
@@ -14,6 +17,7 @@ export type LeaderboardEntry = {
 
 export type LeaderboardSubmission = {
   playerName: string;
+  difficultyId: DifficultyId;
   score: number;
   capacity: number;
   demandCoverage: number;

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DifficultyId, isDifficultyId } from "../data/difficulty";
 import { ScoreBreakdown } from "../lib/gameEngine";
 import {
   LEADERBOARD_API_PATH,
@@ -15,6 +16,7 @@ function isLeaderboardEntry(value: unknown): value is LeaderboardEntry {
   return (
     typeof entry.id === "string" &&
     typeof entry.playerName === "string" &&
+    isDifficultyId(entry.difficultyId) &&
     typeof entry.score === "number" &&
     typeof entry.capacity === "number" &&
     typeof entry.demandCoverage === "number" &&
@@ -48,11 +50,13 @@ async function readErrorMessage(response: Response): Promise<string> {
 
 function buildSubmission(
   playerName: string,
+  difficultyId: DifficultyId,
   breakdown: ScoreBreakdown,
   sites: string[],
 ): LeaderboardSubmission {
   return {
     playerName,
+    difficultyId,
     score: breakdown.score,
     capacity: breakdown.capacity,
     demandCoverage: breakdown.demandCoverage,
@@ -106,14 +110,21 @@ export function useLeaderboard() {
   }, [refreshEntries]);
 
   const addEntry = useCallback(
-    async (playerName: string, breakdown: ScoreBreakdown, sites: string[]) => {
+    async (
+      playerName: string,
+      difficultyId: DifficultyId,
+      breakdown: ScoreBreakdown,
+      sites: string[],
+    ) => {
       const response = await fetch(LEADERBOARD_API_PATH, {
         method: "POST",
         headers: {
           accept: "application/json",
           "content-type": "application/json",
         },
-        body: JSON.stringify(buildSubmission(playerName, breakdown, sites)),
+        body: JSON.stringify(
+          buildSubmission(playerName, difficultyId, breakdown, sites),
+        ),
       });
 
       if (!response.ok) {

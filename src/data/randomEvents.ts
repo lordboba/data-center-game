@@ -13,6 +13,7 @@ export type EventFamily =
   | "geopolitics";
 
 export type EventSeverity = "low" | "medium" | "high";
+export type EventOutcomeTone = "favorable" | "mixed" | "adverse";
 
 export type EventRiskMetric =
   | "peopleSupport"
@@ -52,6 +53,7 @@ export type RandomEventEffects = ActionEffects & {
 export type RandomEventOutcome = {
   id: string;
   summary: string;
+  tone: EventOutcomeTone;
   weightBySeverity: Record<EventSeverity, number>;
   effects: RandomEventEffects;
 };
@@ -85,8 +87,36 @@ function outcome(
   summary: string,
   weightBySeverity: Record<EventSeverity, number>,
   effects: RandomEventEffects,
+  tone: EventOutcomeTone,
 ): RandomEventOutcome {
-  return { id, summary, weightBySeverity, effects };
+  return { id, summary, tone, weightBySeverity, effects };
+}
+
+function favorableOutcome(
+  id: string,
+  summary: string,
+  weightBySeverity: Record<EventSeverity, number>,
+  effects: RandomEventEffects,
+): RandomEventOutcome {
+  return outcome(id, summary, weightBySeverity, effects, "favorable");
+}
+
+function mixedOutcome(
+  id: string,
+  summary: string,
+  weightBySeverity: Record<EventSeverity, number>,
+  effects: RandomEventEffects,
+): RandomEventOutcome {
+  return outcome(id, summary, weightBySeverity, effects, "mixed");
+}
+
+function adverseOutcome(
+  id: string,
+  summary: string,
+  weightBySeverity: Record<EventSeverity, number>,
+  effects: RandomEventEffects,
+): RandomEventOutcome {
+  return outcome(id, summary, weightBySeverity, effects, "adverse");
 }
 
 function publicResponseChoices(topic: string): RandomEventChoice[] {
@@ -96,7 +126,7 @@ function publicResponseChoices(topic: string): RandomEventChoice[] {
       label: "Engage publicly",
       body: "Fund a transparent response, local briefings, and independent experts.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "trust-recovers",
           `${topic} becomes a chance to show discipline; trust improves.`,
           favorableWeights,
@@ -107,13 +137,13 @@ function publicResponseChoices(topic: string): RandomEventChoice[] {
             outlook: 2,
           },
         ),
-        outcome(
+        mixedOutcome(
           "message-muted",
           `${topic} fades, but only after consuming leadership attention.`,
           mixedWeights,
           { peopleSupport: 1, budgetBalance: -1 },
         ),
-        outcome(
+        adverseOutcome(
           "message-backfires",
           `${topic} spreads beyond the original audience and hardens opposition.`,
           adverseWeights,
@@ -126,13 +156,13 @@ function publicResponseChoices(topic: string): RandomEventChoice[] {
       label: "Stay quiet",
       body: "Avoid amplifying the story and keep execution focused.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "quiet-cycle",
           `${topic} burns out without changing the coalition.`,
           { low: 48, medium: 30, high: 16 },
           { outlook: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "vacuum-filled",
           `Critics fill the vacuum around ${topic}; the next permit fight gets harder.`,
           { low: 22, medium: 38, high: 48 },
@@ -150,7 +180,7 @@ function communityResponseChoices(issue: string): RandomEventChoice[] {
       label: "Negotiate concessions",
       body: "Use budget to settle the immediate local dispute.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "durable-compact",
           `${issue} turns into a signed local compact with enforceable benefits.`,
           favorableWeights,
@@ -161,13 +191,13 @@ function communityResponseChoices(issue: string): RandomEventChoice[] {
             budgetBalance: -1,
           },
         ),
-        outcome(
+        mixedOutcome(
           "expensive-peace",
           `${issue} quiets down, but the settlement is expensive.`,
           mixedWeights,
           { peopleSupport: 3, budgetBalance: -2 },
         ),
-        outcome(
+        adverseOutcome(
           "moving-target",
           `${issue} keeps moving as new groups demand the same concessions.`,
           adverseWeights,
@@ -180,13 +210,13 @@ function communityResponseChoices(issue: string): RandomEventChoice[] {
       label: "Fight it",
       body: "Preserve budget and challenge the complaint on process.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "challenge-dismissed",
           `${issue} is narrowed by the record and loses force.`,
           { low: 54, medium: 36, high: 20 },
           { regulatorSupport: 2, outlook: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "legal-delay",
           `${issue} delays the calendar and damages local permission.`,
           { low: 18, medium: 34, high: 48 },
@@ -215,19 +245,19 @@ function financeChoices(issue: string): RandomEventChoice[] {
       label: "Protect liquidity",
       body: "Slow discretionary spend and preserve budget flexibility.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "credit-discipline",
           `${issue} is handled with credible discipline; investors stay patient.`,
           favorableWeights,
           { businessSupport: 4, outlook: 2, budgetBalance: 1 },
         ),
-        outcome(
+        mixedOutcome(
           "underbuilt-pipeline",
           `${issue} protects cash but leaves the buildout looking timid.`,
           mixedWeights,
           { businessSupport: -2, outlook: -2 },
         ),
-        outcome(
+        adverseOutcome(
           "market-doubts",
           `${issue} becomes a signal that the campaign is underfunded.`,
           adverseWeights,
@@ -245,13 +275,13 @@ function financeChoices(issue: string): RandomEventChoice[] {
       label: "Raise capital",
       body: "Accept higher financing cost to keep the buildout moving.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "oversubscribed",
           `${issue} draws new capital and gives the next period more room.`,
           { low: 46, medium: 38, high: 24 },
           { businessSupport: 5, budgetBalance: 3, outlook: 2 },
         ),
-        outcome(
+        adverseOutcome(
           "expensive-money",
           `Capital arrives for ${issue}, but every project carries a financing premium.`,
           { low: 26, medium: 34, high: 44 },
@@ -280,7 +310,7 @@ function vendorChoices(issue: string): RandomEventChoice[] {
       label: "Take the deal",
       body: "Use the vendor offer to buy time.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "vendor-bridge",
           `${issue} gives the campaign a useful bridge without losing control.`,
           favorableWeights,
@@ -291,7 +321,7 @@ function vendorChoices(issue: string): RandomEventChoice[] {
             outlook: 2,
           },
         ),
-        outcome(
+        mixedOutcome(
           "strings-attached",
           `${issue} helps now, but creates dependency and pricing pressure later.`,
           mixedWeights,
@@ -309,7 +339,7 @@ function vendorChoices(issue: string): RandomEventChoice[] {
             ],
           },
         ),
-        outcome(
+        adverseOutcome(
           "vendor-headline",
           `${issue} is framed as a bailout and weakens the coalition.`,
           adverseWeights,
@@ -327,13 +357,13 @@ function vendorChoices(issue: string): RandomEventChoice[] {
       label: "Stay independent",
       body: "Reject the offer and keep the operating model clean.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "clean-position",
           `Rejecting ${issue} strengthens confidence in the plan.`,
           { low: 42, medium: 34, high: 24 },
           { businessSupport: 2, politicalSupport: 2, outlook: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "missed-bridge",
           `Passing on ${issue} leaves the near-term compute gap exposed.`,
           { low: 20, medium: 32, high: 46 },
@@ -351,7 +381,7 @@ function utilityChoices(issue: string): RandomEventChoice[] {
       label: "Pay for certainty",
       body: "Spend budget to secure engineering, reserves, and queue priority.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "utility-aligned",
           `${issue} is contained through better utility coordination.`,
           favorableWeights,
@@ -362,13 +392,13 @@ function utilityChoices(issue: string): RandomEventChoice[] {
             budgetBalance: -1,
           },
         ),
-        outcome(
+        mixedOutcome(
           "partial-relief",
           `${issue} improves, but the utility still demands costly upgrades.`,
           mixedWeights,
           { powerMW: 250, regulatorSupport: 1, budgetBalance: -2 },
         ),
-        outcome(
+        adverseOutcome(
           "ratepayer-backlash",
           `${issue} spills into ratepayer politics.`,
           adverseWeights,
@@ -386,13 +416,13 @@ function utilityChoices(issue: string): RandomEventChoice[] {
       label: "Wait for process",
       body: "Avoid special treatment and ride the standard utility process.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "queue-clears",
           `${issue} clears without extra spend.`,
           { low: 46, medium: 28, high: 14 },
           { regulatorSupport: 2, budgetBalance: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "queue-stalls",
           `${issue} stalls, raising costs for near-term capacity work.`,
           { low: 20, medium: 38, high: 54 },
@@ -421,7 +451,7 @@ function climateChoices(issue: string): RandomEventChoice[] {
       label: "Harden sites",
       body: "Spend on resilience and operating safeguards.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "resilience-proven",
           `${issue} proves the resilience program is real.`,
           favorableWeights,
@@ -433,13 +463,13 @@ function climateChoices(issue: string): RandomEventChoice[] {
             outlook: 2,
           },
         ),
-        outcome(
+        mixedOutcome(
           "costly-hardening",
           `${issue} is managed, but hardening consumes budget.`,
           mixedWeights,
           { coolingMW: 120, waterMLDay: 80, budgetBalance: -2 },
         ),
-        outcome(
+        adverseOutcome(
           "visible-strain",
           `${issue} exposes operational strain despite the spend.`,
           adverseWeights,
@@ -452,13 +482,13 @@ function climateChoices(issue: string): RandomEventChoice[] {
       label: "Operate through it",
       body: "Keep capital focused on the buildout and accept operating risk.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "weather-passes",
           `${issue} passes with limited operational impact.`,
           { low: 44, medium: 28, high: 12 },
           { outlook: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "operating-losses",
           `${issue} creates outages and local scrutiny.`,
           { low: 20, medium: 38, high: 58 },
@@ -482,7 +512,7 @@ function laborSupplyChoices(issue: string): RandomEventChoice[] {
       label: "Secure supply",
       body: "Pay premiums for labor stability and critical equipment.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "pipeline-secured",
           `${issue} is contained before it hits the delivery calendar.`,
           favorableWeights,
@@ -493,7 +523,7 @@ function laborSupplyChoices(issue: string): RandomEventChoice[] {
             budgetBalance: -1,
           },
         ),
-        outcome(
+        mixedOutcome(
           "premium-paid",
           `${issue} is solved, but suppliers extract a premium.`,
           mixedWeights,
@@ -510,7 +540,7 @@ function laborSupplyChoices(issue: string): RandomEventChoice[] {
             ],
           },
         ),
-        outcome(
+        adverseOutcome(
           "supply-squeeze",
           `${issue} worsens even after paying premiums.`,
           adverseWeights,
@@ -528,13 +558,13 @@ function laborSupplyChoices(issue: string): RandomEventChoice[] {
       label: "Hold the line",
       body: "Refuse premiums and keep procurement discipline.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "discipline-rewarded",
           `${issue} resolves without breaking procurement discipline.`,
           { low: 42, medium: 28, high: 16 },
           { businessSupport: 3, budgetBalance: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "missed-slots",
           `${issue} causes missed delivery slots and credibility loss.`,
           { low: 18, medium: 36, high: 54 },
@@ -552,7 +582,7 @@ function securityChoices(issue: string): RandomEventChoice[] {
       label: "Full remediation",
       body: "Stop, disclose, audit, and fix the root cause.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "trustworthy-fix",
           `${issue} becomes evidence of operational maturity.`,
           favorableWeights,
@@ -564,13 +594,13 @@ function securityChoices(issue: string): RandomEventChoice[] {
             outlook: 2,
           },
         ),
-        outcome(
+        mixedOutcome(
           "contained-incident",
           `${issue} is contained, but the audit is expensive.`,
           mixedWeights,
           { regulatorSupport: 2, budgetBalance: -2 },
         ),
-        outcome(
+        adverseOutcome(
           "audit-expands",
           `${issue} expands into a broader compliance review.`,
           adverseWeights,
@@ -583,13 +613,13 @@ function securityChoices(issue: string): RandomEventChoice[] {
       label: "Quiet fix",
       body: "Patch quickly and avoid a public process.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "quietly-contained",
           `${issue} is fixed before anyone notices.`,
           { low: 50, medium: 28, high: 12 },
           { budgetBalance: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "coverup-story",
           `${issue} leaks and the quiet fix looks like a coverup.`,
           { low: 18, medium: 40, high: 62 },
@@ -612,7 +642,7 @@ function technologyChoices(issue: string): RandomEventChoice[] {
       label: "Adopt quickly",
       body: "Move fast to capture the technical upside.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "technical-edge",
           `${issue} improves the buildout economics.`,
           favorableWeights,
@@ -624,13 +654,13 @@ function technologyChoices(issue: string): RandomEventChoice[] {
             outlook: 3,
           },
         ),
-        outcome(
+        mixedOutcome(
           "integration-cost",
           `${issue} works, but integration is harder than promised.`,
           mixedWeights,
           { computeH100e: 240_000, budgetBalance: -1 },
         ),
-        outcome(
+        adverseOutcome(
           "immature-tech",
           `${issue} proves immature and distracts the operating team.`,
           adverseWeights,
@@ -643,13 +673,13 @@ function technologyChoices(issue: string): RandomEventChoice[] {
       label: "Pilot first",
       body: "Run a limited deployment before committing the network.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "pilot-decision",
           `${issue} produces clean data and a safer rollout plan.`,
           { low: 44, medium: 38, high: 28 },
           { regulatorSupport: 2, businessSupport: 2, outlook: 2 },
         ),
-        outcome(
+        adverseOutcome(
           "too-slow",
           `A cautious pilot for ${issue} misses the market window.`,
           { low: 20, medium: 30, high: 42 },
@@ -667,7 +697,7 @@ function geopoliticalChoices(issue: string): RandomEventChoice[] {
       label: "Stockpile and reroute",
       body: "Buy critical inventory and reroute commitments before markets tighten.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "buffer-built",
           `${issue} is painful but the buffer protects delivery.`,
           favorableWeights,
@@ -685,7 +715,7 @@ function geopoliticalChoices(issue: string): RandomEventChoice[] {
             ],
           },
         ),
-        outcome(
+        mixedOutcome(
           "expensive-buffer",
           `${issue} forces costly inventory purchases.`,
           mixedWeights,
@@ -702,7 +732,7 @@ function geopoliticalChoices(issue: string): RandomEventChoice[] {
             ],
           },
         ),
-        outcome(
+        adverseOutcome(
           "supply-shock",
           `${issue} overwhelms the buffer and pushes prices higher.`,
           adverseWeights,
@@ -728,13 +758,13 @@ function geopoliticalChoices(issue: string): RandomEventChoice[] {
       label: "Wait it out",
       body: "Avoid panic buying and preserve budget.",
       outcomes: [
-        outcome(
+        favorableOutcome(
           "shock-fades",
           `${issue} de-escalates before it changes the build plan.`,
           { low: 40, medium: 24, high: 12 },
           { budgetBalance: 1, outlook: 1 },
         ),
-        outcome(
+        adverseOutcome(
           "prices-run",
           `${issue} persists and prices run away before procurement can react.`,
           { low: 24, medium: 42, high: 62 },

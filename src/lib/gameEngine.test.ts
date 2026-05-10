@@ -6,6 +6,8 @@ import {
 } from "../data/gameData";
 import { RANDOM_EVENTS } from "../data/randomEvents";
 import {
+  canChangeDifficulty,
+  changeDifficulty,
   continueFromReport,
   findAction,
   GameState,
@@ -16,6 +18,7 @@ import {
   getRandomEventSeverity,
   initialGameState,
   resolveRandomEventChoice,
+  restartRun,
   rollRandomEventForTurn,
 } from "./gameEngine";
 
@@ -37,6 +40,28 @@ function periodIndexFor(year: number): number {
   const period = CAMPAIGN_PERIODS.find((candidate) => candidate.year === year);
   if (!period) throw new Error(`Missing period for ${year}`);
   return period.index;
+}
+
+function testReport(periodIndex = periodIndexFor(2026)) {
+  return {
+    periodIndex,
+    year: CAMPAIGN_PERIODS[periodIndex].year,
+    periodLabel: CAMPAIGN_PERIODS[periodIndex].label,
+    summary: "Test report.",
+    completedProjects: [],
+    headlines: [],
+    warnings: [],
+    advisorTips: [],
+    metricDeltas: {
+      computeCoverage: 0,
+      powerCoverage: 0,
+      coolingCoverage: 0,
+      waterCoverage: 0,
+      peopleSupport: 0,
+      politicalSupport: 0,
+      outlook: 0,
+    },
+  };
 }
 
 function findStateThatRollsEvent(): GameState {
@@ -103,6 +128,57 @@ describe("game economy", () => {
     expect(getInflationMultiplier(crisisState)).toBeCloseTo(
       getInflationMultiplier(baseState) * 1.2,
     );
+  });
+
+  it("uses easy as the baseline and raises inflation for medium and hard", () => {
+    const easyState = stateWith({
+      difficultyId: "easy",
+      periodIndex: periodIndexFor(2026),
+      year: 2026,
+    });
+    const mediumState = stateWith({
+      ...easyState,
+      difficultyId: "medium",
+    });
+    const hardState = stateWith({
+      ...easyState,
+      difficultyId: "hard",
+    });
+
+    expect(getInflationMultiplier(easyState)).toBeCloseTo(Math.pow(1.1, 4));
+    expect(getInflationMultiplier(mediumState)).toBeGreaterThan(
+      getInflationMultiplier(easyState),
+    );
+    expect(getInflationMultiplier(hardState)).toBeGreaterThan(
+      getInflationMultiplier(mediumState),
+    );
+  });
+});
+
+describe("difficulty selection", () => {
+  it("can be changed before commitments and is preserved by restart", () => {
+    const changed = changeDifficulty(initialGameState, "hard");
+
+    expect(changed.difficultyId).toBe("hard");
+    expect(restartRun(changed.difficultyId).difficultyId).toBe("hard");
+  });
+
+  it("cannot be changed once projects are committed", () => {
+    const committedState = stateWith({
+      projects: [
+        {
+          id: "queued-campus",
+          cardId: "hyperscale-campus",
+          siteId: DATA_CENTER_SITES[0].id,
+          selectedPeriodIndex: 0,
+          readyPeriodIndex: 0,
+          cost: 5,
+        },
+      ],
+    });
+
+    expect(canChangeDifficulty(committedState)).toBe(false);
+    expect(changeDifficulty(committedState, "hard").difficultyId).toBe("easy");
   });
 });
 
@@ -205,6 +281,47 @@ describe("random events", () => {
     expect(getRandomEventSeverity("local-protests", fragileState)).toBe("high");
   });
 
+  it("rolls standard random events more often on medium than easy", () => {
+    let matchedState: GameState | null = null;
+
+    for (let seed = 1; seed < 20_000; seed += 1) {
+      const state = stateWith({
+        difficultyId: "easy",
+        periodIndex: periodIndexFor(2026),
+        year: 2026,
+        rngSeed: seed,
+        rngStep: 0,
+        eventCooldownPeriods: 0,
+        builtSiteIds: [DATA_CENTER_SITES[0].id, DATA_CENTER_SITES[1].id],
+        infrastructure: {
+          computeH100e: 3_000_000,
+          powerMW: 1_000,
+          coolingMW: 500,
+          waterMLDay: 250,
+        },
+      });
+
+      if (
+        !rollRandomEventForTurn(state).pendingEvent &&
+        rollRandomEventForTurn({ ...state, difficultyId: "medium" })
+          .pendingEvent
+      ) {
+        matchedState = state;
+        break;
+      }
+    }
+
+    if (!matchedState) {
+      throw new Error("Could not find medium-only random-event seed.");
+    }
+
+    expect(rollRandomEventForTurn(matchedState).pendingEvent).toBeNull();
+    expect(
+      rollRandomEventForTurn({ ...matchedState, difficultyId: "medium" })
+        .pendingEvent,
+    ).not.toBeNull();
+  });
+
   it("applies prolonged war inflation and expires it cleanly", () => {
     let resolved: GameState | null = null;
 
@@ -213,25 +330,7 @@ describe("random events", () => {
         periodIndex: periodIndexFor(2026),
         year: 2026,
         phase: "report",
-        report: {
-          periodIndex: periodIndexFor(2026),
-          year: 2026,
-          periodLabel: "Jan-Feb 2026",
-          summary: "Test report.",
-          completedProjects: [],
-          headlines: [],
-          warnings: [],
-          advisorTips: [],
-          metricDeltas: {
-            computeCoverage: 0,
-            powerCoverage: 0,
-            coolingCoverage: 0,
-            waterCoverage: 0,
-            peopleSupport: 0,
-            politicalSupport: 0,
-            outlook: 0,
-          },
-        },
+        report: testReport(),
         rngSeed: seed,
         rngStep: 0,
         pendingEvent: {
@@ -272,6 +371,65 @@ describe("random events", () => {
     });
 
     expect(expired.activeModifiers).not.toContainEqual(warModifier);
+  });
+
+  it("lets hard-mode independent wars stack with existing war inflation", () => {
+    const periodIndex = periodIndexFor(2026);
+    const existingWar = {
+      id: "existing-war",
+      sourceEventId: "war-started",
+      label: "War inflation",
+      description: "Existing test war.",
+      costMultiplier: 1.08,
+      endsAtPeriodIndex: periodIndex + 6,
+    };
+    let rolled: GameState | null = null;
+
+    for (let seed = 1; seed < 20_000; seed += 1) {
+      const state = stateWith({
+        difficultyId: "hard",
+        periodIndex,
+        year: 2026,
+        phase: "report",
+        report: testReport(periodIndex),
+        rngSeed: seed,
+        rngStep: 0,
+        eventCooldownPeriods: 5,
+        builtSiteIds: [DATA_CENTER_SITES[0].id],
+        activeModifiers: [existingWar],
+      });
+      const candidate = rollRandomEventForTurn(state);
+      const warModifiers = candidate.activeModifiers.filter(
+        (modifier) => modifier.label === "War inflation",
+      );
+
+      if (warModifiers.length === 2) {
+        rolled = candidate;
+        break;
+      }
+    }
+
+    if (!rolled) {
+      throw new Error("Could not find hard-mode independent war seed.");
+    }
+
+    const baseHardState = stateWith({
+      difficultyId: "hard",
+      periodIndex,
+      year: 2026,
+    });
+
+    expect(
+      rolled.activeModifiers.filter(
+        (modifier) => modifier.label === "War inflation",
+      ),
+    ).toHaveLength(2);
+    expect(getInflationMultiplier(rolled)).toBeCloseTo(
+      getInflationMultiplier(baseHardState) * 1.08 * 1.08,
+    );
+    expect(rolled.report?.warnings).toContain(
+      "Hard-mode war risk is independent of normal random events; overlapping wars multiply project costs.",
+    );
   });
 
   it("keeps representative event families in the catalog", () => {

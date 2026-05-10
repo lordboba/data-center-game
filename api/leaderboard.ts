@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis/cloudflare";
+import { DEFAULT_DIFFICULTY_ID, isDifficultyId } from "../src/data/difficulty";
 import {
   LEADERBOARD_DISPLAY_LIMIT,
   LeaderboardEntry,
@@ -129,6 +130,9 @@ function submissionFromBody(body: unknown): LeaderboardSubmission {
   const input = body as Record<string, unknown>;
   return {
     playerName: textField(input.playerName, "Operator", 22),
+    difficultyId: isDifficultyId(input.difficultyId)
+      ? input.difficultyId
+      : DEFAULT_DIFFICULTY_ID,
     score: numberField(input.score, "score", 0, 1_000_000),
     capacity: numberField(input.capacity, "capacity", 0, 1_000_000),
     demandCoverage: numberField(input.demandCoverage, "demandCoverage", 0, 100),
@@ -150,6 +154,7 @@ function parseStoredEntry(value: unknown): LeaderboardEntry | null {
     if (
       typeof parsed.id !== "string" ||
       typeof parsed.playerName !== "string" ||
+      !isDifficultyId(parsed.difficultyId) ||
       typeof parsed.score !== "number" ||
       typeof parsed.capacity !== "number" ||
       typeof parsed.demandCoverage !== "number" ||

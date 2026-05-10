@@ -34,9 +34,16 @@ import {
   WIN_SCORE,
 } from "./data/gameData";
 import type { ActionCard, DataCenterSite } from "./data/gameData";
+import {
+  DIFFICULTY_MODES,
+  DifficultyId,
+  getDifficultyMode,
+} from "./data/difficulty";
 import { useLeaderboard } from "./hooks/useLeaderboard";
 import {
   calculateScore,
+  canChangeDifficulty,
+  changeDifficulty,
   completeTutorialStep,
   continueFromReport,
   findAction,
@@ -905,6 +912,7 @@ function RunSummary({
   const builtSites = getBuiltSites(state);
   const score = calculateScore(state);
   const outcome = getRunOutcome(state);
+  const difficulty = getDifficultyMode(state.difficultyId);
 
   const saveRun = async () => {
     if (saved || saving) return;
@@ -914,6 +922,7 @@ function RunSummary({
     try {
       await addEntry(
         playerName,
+        state.difficultyId,
         score,
         builtSites.map((site) => site.metro),
       );
@@ -944,6 +953,11 @@ function RunSummary({
         </p>
       </div>
       <div className="summary-metrics">
+        <MetricCard
+          icon={<ShieldCheck size={16} />}
+          label="Difficulty"
+          value={difficulty.label}
+        />
         <MetricCard
           asset={generatedAssets.labels.coverage}
           label="Sites"
@@ -1119,6 +1133,8 @@ function PlayPage() {
   const annualBudget = getAnnualBudget(state);
   const plannedCost = getPlannedCost(state);
   const committedBuildUnits = getCommittedBuildUnits(state);
+  const activeDifficulty = getDifficultyMode(state.difficultyId);
+  const difficultyChangeable = canChangeDifficulty(state);
   const inflationPercent = Math.round(
     (getInflationMultiplier(state) - 1) * 100,
   );
@@ -1141,11 +1157,15 @@ function PlayPage() {
     showSummary || (state.phase === "finished" && !state.report);
 
   const restart = () => {
-    setState(restartRun());
+    setState((current) => restartRun(current.difficultyId));
     setShowSummary(false);
     setTutorialStepIndex(0);
     setSiteTouched(false);
     setActivePanel(null);
+  };
+
+  const selectDifficulty = (difficultyId: DifficultyId) => {
+    setState((current) => changeDifficulty(current, difficultyId));
   };
 
   const handleSelectSite = (siteId: string) => {
@@ -1238,6 +1258,26 @@ function PlayPage() {
           <h1>Plan the {getCurrentPeriodLabel(state)} AI buildout</h1>
         </div>
         <div className="run-controls">
+          <div className="difficulty-switch" aria-label="Difficulty">
+            <span>Difficulty</span>
+            <div>
+              {DIFFICULTY_MODES.map((difficulty) => (
+                <button
+                  key={difficulty.id}
+                  className={
+                    difficulty.id === state.difficultyId ? "is-active" : ""
+                  }
+                  type="button"
+                  title={difficulty.description}
+                  aria-pressed={difficulty.id === state.difficultyId}
+                  disabled={!difficultyChangeable}
+                  onClick={() => selectDifficulty(difficulty.id)}
+                >
+                  {difficulty.shortLabel}
+                </button>
+              ))}
+            </div>
+          </div>
           <button className="ghost-button" type="button" onClick={restart}>
             <RotateCcw size={16} />
             New run
@@ -1258,6 +1298,11 @@ function PlayPage() {
       </section>
 
       <section className="score-band" aria-label="Run metrics">
+        <MetricCard
+          icon={<ShieldCheck size={16} />}
+          label="Difficulty"
+          value={activeDifficulty.label}
+        />
         <MetricCard
           asset={generatedAssets.labels.year}
           label="Turn"
@@ -1523,7 +1568,10 @@ function LeaderboardPage() {
               <div className="rank-badge">{index + 1}</div>
               <div className="leaderboard-main">
                 <h2>{entry.playerName}</h2>
-                <p>{entry.sites.join(" / ") || "No markets completed"}</p>
+                <p>
+                  {getDifficultyMode(entry.difficultyId).label} /{" "}
+                  {entry.sites.join(" / ") || "No markets completed"}
+                </p>
               </div>
               <div className="leaderboard-stats">
                 <span>

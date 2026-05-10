@@ -22,10 +22,17 @@ import {
   UnlockStage,
 } from "../data/gameData";
 import {
+  DEFAULT_DIFFICULTY_ID,
+  DifficultyId,
+  getDifficultyMode,
+  IndependentWarShock,
+} from "../data/difficulty";
+import {
   RANDOM_EVENTS,
   EventModifierTemplate,
   EventRiskMetric,
   EventSeverity,
+  RandomEventEffects,
   RandomEventChoice,
   RandomEventDefinition,
   RandomEventOutcome,
@@ -111,6 +118,7 @@ export type GameState = {
   year: number;
   phase: GamePhase;
   outcome: GameOutcomeStatus;
+  difficultyId: DifficultyId;
   builtSiteIds: string[];
   completedExpansionCount: number;
   selectedSiteId: string;
@@ -174,6 +182,7 @@ export const initialGameState: GameState = {
   year: START_YEAR,
   phase: "planning",
   outcome: "active",
+  difficultyId: DEFAULT_DIFFICULTY_ID,
   builtSiteIds: [],
   completedExpansionCount: 0,
   selectedSiteId: DATA_CENTER_SITES[0].id,
@@ -473,8 +482,9 @@ export function getActiveModifiers(state: GameState): ActiveGameModifier[] {
 }
 
 export function getInflationMultiplier(state: GameState): number {
+  const difficulty = getDifficultyMode(state.difficultyId);
   const yearInflation = Math.pow(
-    1.1,
+    1 + difficulty.annualInflationRate,
     Math.max(0, getCurrentPeriod(state).year - START_YEAR),
   );
   const modifierMultiplier = getActiveModifiers(state).reduce(
@@ -863,6 +873,32 @@ function severityWeightMultiplier(severity: EventSeverity): number {
   return 0.8;
 }
 
+function eventWeightForDifficulty(
+  event: RandomEventDefinition,
+  state: GameState,
+  supply: SupplySummary,
+): number {
+  const severity = getEventSeverity(event, state, supply);
+  const difficulty = getDifficultyMode(state.difficultyId);
+  return (
+    event.baseWeight *
+    severityWeightMultiplier(severity) *
+    difficulty.eventSeverityWeightMultipliers[severity]
+  );
+}
+
+function outcomeWeightForDifficulty(
+  outcome: RandomEventOutcome,
+  severity: EventSeverity,
+  state: GameState,
+): number {
+  const difficulty = getDifficultyMode(state.difficultyId);
+  return (
+    outcome.weightBySeverity[severity] *
+    difficulty.outcomeToneWeightMultipliers[outcome.tone]
+  );
+}
+
 function chooseWeighted<T>(
   items: T[],
   weightForItem: (item: T) => number,
@@ -933,14 +969,14 @@ function toPendingEvent(
   };
 }
 
-export function rollRandomEventForTurn(state: GameState): GameState {
+function rollStandardRandomEventForTurn(state: GameState): GameState {
   if (state.pendingEvent || state.eventCooldownPeriods > 0) return state;
   if (state.periodIndex < 2) return state;
 
+  const difficulty = getDifficultyMode(state.difficultyId);
   const chanceRoll = consumeRandom(state);
-  const eventChance = 0.28;
   let rngStep = chanceRoll.rngStep;
-  if (chanceRoll.value > eventChance) {
+  if (chanceRoll.value > difficulty.randomEventChance) {
     return { ...state, rngStep };
   }
 
@@ -958,9 +994,7 @@ export function rollRandomEventForTurn(state: GameState): GameState {
   rngStep += 1;
   const selectedEvent = chooseWeighted(
     eligibleEvents,
-    (event) =>
-      event.baseWeight *
-      severityWeightMultiplier(getEventSeverity(event, state, supply)),
+    (event) => eventWeightForDifficulty(event, state, supply),
     eventRoll,
   );
   if (!selectedEvent) return { ...state, rngStep };
@@ -969,9 +1003,18 @@ export function rollRandomEventForTurn(state: GameState): GameState {
   return {
     ...state,
     rngStep,
-    eventCooldownPeriods: selectedEvent.cooldownPeriods ?? 2,
+    eventCooldownPeriods: Math.max(
+      0,
+      (selectedEvent.cooldownPeriods ?? 2) +
+        difficulty.eventCooldownPeriodOffset,
+    ),
     pendingEvent: toPendingEvent(selectedEvent, state, severity),
   };
+}
+
+export function rollRandomEventForTurn(state: GameState): GameState {
+  if (state.pendingEvent) return state;
+  return rollStandardRandomEventForTurn(rollIndependentWarShockForTurn(state));
 }
 
 function createActiveModifier(
@@ -990,37 +1033,134 @@ function createActiveModifier(
   };
 }
 
-function applyRandomEventEffects(
+function applyEventEffects(
   state: GameState,
   eventId: string,
-  outcome: RandomEventOutcome,
+  outcomeId: string,
+  effects: RandomEventEffects,
 ): GameState {
   const applied = applyEffects(
     state.infrastructure,
     state.support,
     state.emissionsIndex,
-    outcome.effects,
+    effects,
   );
-  const modifiers = outcome.effects.modifiers ?? [];
+  const modifiers = effects.modifiers ?? [];
 
   return {
     ...state,
     infrastructure: applied.infrastructure,
     support: applied.support,
     emissionsIndex: applied.emissionsIndex,
-    outlook: clamp(state.outlook + (outcome.effects.outlook ?? 0)),
-    budgetBalance: state.budgetBalance + (outcome.effects.budgetBalance ?? 0),
+    outlook: clamp(state.outlook + (effects.outlook ?? 0)),
+    budgetBalance: state.budgetBalance + (effects.budgetBalance ?? 0),
     eventCooldownPeriods: Math.max(
       state.eventCooldownPeriods,
-      outcome.effects.eventCooldownPeriods ?? 0,
+      effects.eventCooldownPeriods ?? 0,
     ),
     activeModifiers: [
       ...getActiveModifiers(state),
       ...modifiers.map((modifier) =>
-        createActiveModifier(eventId, outcome.id, state.periodIndex, modifier),
+        createActiveModifier(eventId, outcomeId, state.periodIndex, modifier),
       ),
     ],
   };
+}
+
+function applyRandomEventEffects(
+  state: GameState,
+  eventId: string,
+  outcome: RandomEventOutcome,
+): GameState {
+  return applyEventEffects(state, eventId, outcome.id, outcome.effects);
+}
+
+function appendReportStateChange(
+  beforeState: GameState,
+  afterState: GameState,
+  headline: string,
+  warnings: string[] = [],
+): TurnReport | null {
+  if (!afterState.report) return null;
+
+  const before = getSupplySummary(beforeState);
+  const after = getSupplySummary(afterState);
+
+  return {
+    ...afterState.report,
+    headlines: [...afterState.report.headlines, headline],
+    warnings: [...afterState.report.warnings, ...warnings],
+    metricDeltas: {
+      computeCoverage:
+        afterState.report.metricDeltas.computeCoverage +
+        after.computeCoverage -
+        before.computeCoverage,
+      powerCoverage:
+        afterState.report.metricDeltas.powerCoverage +
+        after.powerCoverage -
+        before.powerCoverage,
+      coolingCoverage:
+        afterState.report.metricDeltas.coolingCoverage +
+        after.coolingCoverage -
+        before.coolingCoverage,
+      waterCoverage:
+        afterState.report.metricDeltas.waterCoverage +
+        after.waterCoverage -
+        before.waterCoverage,
+      peopleSupport:
+        afterState.report.metricDeltas.peopleSupport +
+        after.peopleSupport -
+        before.peopleSupport,
+      politicalSupport:
+        afterState.report.metricDeltas.politicalSupport +
+        after.politicalSupport -
+        before.politicalSupport,
+      outlook:
+        afterState.report.metricDeltas.outlook +
+        afterState.outlook -
+        beforeState.outlook,
+    },
+  };
+}
+
+function rollIndependentWarShockForTurn(state: GameState): GameState {
+  const warShock = getDifficultyMode(state.difficultyId).independentWarShock;
+  if (!warShock || !isIndependentWarShockEligible(state, warShock)) {
+    return state;
+  }
+
+  const chanceRoll = consumeRandom(state);
+  if (chanceRoll.value > warShock.chance) {
+    return { ...state, rngStep: chanceRoll.rngStep };
+  }
+
+  const stateWithStep = { ...state, rngStep: chanceRoll.rngStep };
+  const shockedState = applyEventEffects(
+    stateWithStep,
+    "hard-independent-war",
+    `shock-${chanceRoll.rngStep}`,
+    warShock.effects,
+  );
+
+  return {
+    ...shockedState,
+    report: appendReportStateChange(
+      stateWithStep,
+      shockedState,
+      warShock.headline,
+      [warShock.warning],
+    ),
+  };
+}
+
+function isIndependentWarShockEligible(
+  state: GameState,
+  warShock: IndependentWarShock,
+): boolean {
+  return (
+    state.periodIndex >= warShock.firstAvailablePeriod &&
+    getCommittedBuildUnits(state) >= warShock.minBuiltUnits
+  );
 }
 
 function findRandomEventDefinition(eventId: string): RandomEventDefinition {
@@ -1059,55 +1199,19 @@ export function resolveRandomEventChoice(
   const outcomeRoll = consumeRandom(state);
   const outcome = chooseWeighted(
     choice.outcomes,
-    (candidate) => candidate.weightBySeverity[pendingEvent.severity],
+    (candidate) =>
+      outcomeWeightForDifficulty(candidate, pendingEvent.severity, state),
     outcomeRoll.value,
   );
   if (!outcome) return { ...state, rngStep: outcomeRoll.rngStep };
 
-  const before = getSupplySummary(state);
-  const beforeOutlook = state.outlook;
   const nextState = applyRandomEventEffects(
     { ...state, rngStep: outcomeRoll.rngStep },
     event.id,
     outcome,
   );
   const after = getSupplySummary(nextState);
-  const report = nextState.report
-    ? {
-        ...nextState.report,
-        headlines: [...nextState.report.headlines, outcome.summary],
-        metricDeltas: {
-          computeCoverage:
-            nextState.report.metricDeltas.computeCoverage +
-            after.computeCoverage -
-            before.computeCoverage,
-          powerCoverage:
-            nextState.report.metricDeltas.powerCoverage +
-            after.powerCoverage -
-            before.powerCoverage,
-          coolingCoverage:
-            nextState.report.metricDeltas.coolingCoverage +
-            after.coolingCoverage -
-            before.coolingCoverage,
-          waterCoverage:
-            nextState.report.metricDeltas.waterCoverage +
-            after.waterCoverage -
-            before.waterCoverage,
-          peopleSupport:
-            nextState.report.metricDeltas.peopleSupport +
-            after.peopleSupport -
-            before.peopleSupport,
-          politicalSupport:
-            nextState.report.metricDeltas.politicalSupport +
-            after.politicalSupport -
-            before.politicalSupport,
-          outlook:
-            nextState.report.metricDeltas.outlook +
-            nextState.outlook -
-            beforeOutlook,
-        },
-      }
-    : null;
+  const report = appendReportStateChange(state, nextState, outcome.summary);
   const resolvedState = {
     ...nextState,
     pendingEvent: {
@@ -1400,9 +1504,12 @@ export function finishRun(state: GameState): GameState {
   return { ...state, phase: "finished", outcome: getOutcomeForState(state) };
 }
 
-export function restartRun(): GameState {
+export function restartRun(
+  difficultyId: DifficultyId = initialGameState.difficultyId,
+): GameState {
   return {
     ...initialGameState,
+    difficultyId,
     builtSiteIds: [...initialGameState.builtSiteIds],
     completedExpansionCount: initialGameState.completedExpansionCount,
     selectedActionIds: [...initialGameState.selectedActionIds],
@@ -1416,6 +1523,24 @@ export function restartRun(): GameState {
     support: { ...initialGameState.support },
     infrastructure: { ...initialGameState.infrastructure },
   };
+}
+
+export function canChangeDifficulty(state: GameState): boolean {
+  return (
+    state.phase === "planning" &&
+    state.periodIndex === initialGameState.periodIndex &&
+    state.projects.length === 0 &&
+    state.builtSiteIds.length === initialGameState.builtSiteIds.length &&
+    state.completedExpansionCount === initialGameState.completedExpansionCount
+  );
+}
+
+export function changeDifficulty(
+  state: GameState,
+  difficultyId: DifficultyId,
+): GameState {
+  if (!canChangeDifficulty(state)) return state;
+  return { ...state, difficultyId };
 }
 
 export function completeTutorialStep(
