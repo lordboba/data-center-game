@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import {
-  Award,
   BatteryCharging,
   BookOpen,
   Building2,
   ChevronRight,
-  CircleDollarSign,
   Clock3,
   MapPin,
   Play,
@@ -45,10 +43,49 @@ import {
   selectNextCandidate,
 } from "./lib/gameEngine";
 
+const generatedAssets = {
+  ui: {
+    meterStrip: "/generated-assets/ui/meter-strip.svg",
+    titleLockup: "/generated-assets/ui/title-lockup.svg",
+  },
+  labels: {
+    budget: "/generated-assets/labels/budget.svg",
+    coverage: "/generated-assets/labels/coverage.svg",
+    demand: "/generated-assets/labels/demand.svg",
+    leaderboard: "/generated-assets/labels/leaderboard.svg",
+    power: "/generated-assets/labels/power.svg",
+    water: "/generated-assets/labels/water.svg",
+    year: "/generated-assets/labels/year.svg",
+  },
+  infrastructure: [
+    { name: "GPU Pod", src: "/generated-assets/objects/gpu-pod.svg" },
+    {
+      name: "Grid Interconnect",
+      src: "/generated-assets/objects/grid-interconnect.svg",
+    },
+    {
+      name: "Solar + Battery",
+      src: "/generated-assets/objects/renewable-ppa.svg",
+    },
+    { name: "Chiller Yard", src: "/generated-assets/objects/chiller-yard.svg" },
+    { name: "Water Reuse", src: "/generated-assets/objects/water-reuse.svg" },
+    {
+      name: "Frontier Campus",
+      src: "/generated-assets/objects/frontier-campus.svg",
+    },
+  ],
+};
+
 function formatClock(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
   return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function infrastructureAsset(index: number) {
+  return generatedAssets.infrastructure[
+    index % generatedAssets.infrastructure.length
+  ];
 }
 
 function AppShell({ children }: { children: React.ReactNode }) {
@@ -79,11 +116,17 @@ function HomePage() {
     <main className="home-page">
       <section className="home-hero">
         <div className="home-copy">
+          <img
+            className="title-lockup"
+            src={generatedAssets.ui.titleLockup}
+            alt=""
+            aria-hidden="true"
+          />
           <p className="eyebrow">Grid strategy simulator</p>
           <h1>Data Center Game</h1>
           <p className="lede">
-            Pick a six-site US footprint, balance latency against power and climate risk, then post
-            the run to the leaderboard.
+            Pick a six-site US footprint, balance latency against power and
+            climate risk, then post the run to the leaderboard.
           </p>
           <div className="home-actions" aria-label="Home actions">
             <Link className="primary-action" to="/play">
@@ -109,8 +152,15 @@ function HomePage() {
               <strong>Month/Qtr</strong>
             </div>
           </div>
+          <InfrastructureStack builtCount={MAX_BUILDS} compact />
         </div>
         <div className="home-map-panel" aria-label="United States map preview">
+          <img
+            className="home-meter-strip"
+            src={generatedAssets.ui.meterStrip}
+            alt=""
+            aria-hidden="true"
+          />
           <UnitedStatesMap compact />
         </div>
       </section>
@@ -120,21 +170,50 @@ function HomePage() {
 
 function MetricCard({
   icon,
+  asset,
   label,
   value,
   tone,
 }: {
-  icon: React.ReactNode;
+  icon?: React.ReactNode;
+  asset?: string;
   label: string;
   value: string | number;
   tone?: "good" | "warning";
 }) {
   return (
     <div className={`metric-card ${tone ? `metric-card--${tone}` : ""}`}>
-      <span className="metric-card__icon">{icon}</span>
+      <span className="metric-card__icon">
+        {asset ? <img src={asset} alt="" aria-hidden="true" /> : icon}
+      </span>
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function InfrastructureStack({
+  builtCount,
+  compact = false,
+}: {
+  builtCount: number;
+  compact?: boolean;
+}) {
+  return (
+    <section
+      className={compact ? "build-stack build-stack--compact" : "build-stack"}
+      aria-label="Infrastructure build stack"
+    >
+      {generatedAssets.infrastructure.map((asset, index) => (
+        <div
+          className={`build-stack__item ${index < builtCount ? "build-stack__item--active" : ""}`}
+          key={asset.name}
+        >
+          <img src={asset.src} alt="" aria-hidden="true" />
+          <span>{asset.name}</span>
+        </div>
+      ))}
+    </section>
   );
 }
 
@@ -147,11 +226,14 @@ function SitePanel({
   setState: React.Dispatch<React.SetStateAction<GameState>>;
   mode: ReturnType<typeof getGameMode>;
 }) {
-  const selectedSite = DATA_CENTER_SITES.find((site) => site.id === state.selectedSiteId)!;
+  const selectedSite = DATA_CENTER_SITES.find(
+    (site) => site.id === state.selectedSiteId,
+  )!;
   const score = calculateScore(state.builtSiteIds, state.missedPeriods);
   const affordable = getAffordableSites(state);
   const builtSet = new Set(state.builtSiteIds);
   const canBuild = canBuildSite(state, selectedSite.id);
+  const nextAsset = infrastructureAsset(state.builtSiteIds.length);
 
   const buildSelected = () => {
     setState((current) => {
@@ -164,30 +246,52 @@ function SitePanel({
   return (
     <aside className="decision-panel" aria-label="Site decision panel">
       <div className="turn-strip">
-        <span>{mode.shortLabel} {Math.min(state.turn, mode.maxPeriods)} of {mode.maxPeriods}</span>
-        <small>{state.builtSiteIds.length}/{MAX_BUILDS} builds</small>
-        <button className="ghost-button" type="button" onClick={() => setState(restartRun())}>
+        <span>
+          {mode.shortLabel} {Math.min(state.turn, mode.maxPeriods)} of{" "}
+          {mode.maxPeriods}
+        </span>
+        <small>
+          {state.builtSiteIds.length}/{MAX_BUILDS} builds
+        </small>
+        <button
+          className="ghost-button"
+          type="button"
+          onClick={() => setState(restartRun())}
+        >
           <RotateCcw size={16} />
           Restart
         </button>
       </div>
 
       <div className="selected-site">
-        <p className="eyebrow">Selected market</p>
-        <h2>
-          {selectedSite.metro}
-          <span>{selectedSite.state}</span>
-        </h2>
+        <div className="selected-site__heading">
+          <div>
+            <p className="eyebrow">Selected market</p>
+            <h2>
+              {selectedSite.metro}
+              <span>{selectedSite.state}</span>
+            </h2>
+          </div>
+          <img src={nextAsset.src} alt="" aria-hidden="true" />
+        </div>
         <p>{selectedSite.note}</p>
         <div className="site-metrics">
           <span>Build {formatBudget(selectedSite.capex)}</span>
           <span>{selectedSite.capacity} MW</span>
           <span>{selectedSite.region}</span>
         </div>
+        <div className="next-build-strip">
+          <span>Build profile</span>
+          <strong>{nextAsset.name}</strong>
+        </div>
       </div>
 
       <div className="site-score-grid">
-        <MetricCard icon={<Zap size={15} />} label="Latency" value={selectedSite.latency} />
+        <MetricCard
+          icon={<Zap size={15} />}
+          label="Latency"
+          value={selectedSite.latency}
+        />
         <MetricCard
           icon={<BatteryCharging size={15} />}
           label="Clean power"
@@ -208,7 +312,12 @@ function SitePanel({
         />
       </div>
 
-      <button className="build-button" type="button" disabled={!canBuild} onClick={buildSelected}>
+      <button
+        className="build-button"
+        type="button"
+        disabled={!canBuild}
+        onClick={buildSelected}
+      >
         {builtSet.has(selectedSite.id)
           ? "Already built"
           : selectedSite.capex > score.budgetRemaining
@@ -218,10 +327,13 @@ function SitePanel({
       </button>
 
       <div className="site-list" aria-label="Candidate markets">
-        {DATA_CENTER_SITES.map((site) => {
+        {DATA_CENTER_SITES.map((site, index) => {
           const isBuilt = builtSet.has(site.id);
           const isSelected = site.id === selectedSite.id;
-          const isAffordable = affordable.some((candidate) => candidate.id === site.id);
+          const isAffordable = affordable.some(
+            (candidate) => candidate.id === site.id,
+          );
+          const asset = infrastructureAsset(index);
 
           return (
             <button
@@ -232,13 +344,29 @@ function SitePanel({
                 isSelected ? "site-list-item--active" : "",
                 isBuilt ? "site-list-item--built" : "",
               ].join(" ")}
-              onClick={() => setState((current) => ({ ...current, selectedSiteId: site.id }))}
+              onClick={() =>
+                setState((current) => ({ ...current, selectedSiteId: site.id }))
+              }
             >
-              <span>
-                {site.metro}
-                <small>{site.state}</small>
+              <span className="site-list-main">
+                <img
+                  className="site-list-thumb"
+                  src={asset.src}
+                  alt=""
+                  aria-hidden="true"
+                />
+                <span>
+                  <b>{site.metro}</b>
+                  <small>{site.state}</small>
+                </span>
               </span>
-              <strong>{isBuilt ? "Built" : isAffordable ? formatBudget(site.capex) : "Locked"}</strong>
+              <strong>
+                {isBuilt
+                  ? "Built"
+                  : isAffordable
+                    ? formatBudget(site.capex)
+                    : "Locked"}
+              </strong>
             </button>
           );
         })}
@@ -275,22 +403,39 @@ function RunSummary({
   };
 
   return (
-    <div className="summary-card" role="dialog" aria-modal="true" aria-label="Run summary">
+    <div
+      className="summary-card"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Run summary"
+    >
       <div>
         <p className={`eyebrow outcome-${outcome.status}`}>{outcome.title}</p>
         <h2>{score.score}</h2>
         <p>
-          {builtSites.length} {builtSites.length === 1 ? "market" : "markets"}, {score.capacity} MW, {score.demandCoverage}% demand coverage.
-          {" "}
+          {builtSites.length} {builtSites.length === 1 ? "market" : "markets"},{" "}
+          {score.capacity} MW, {score.demandCoverage}% demand coverage.{" "}
           {outcome.description}
         </p>
       </div>
       <div className="summary-metrics">
-        <MetricCard icon={<MapPin size={16} />} label="Sites" value={builtSites.length} />
-        <MetricCard icon={<Zap size={16} />} label="Latency" value={score.avgLatency} />
-        <MetricCard icon={<Waves size={16} />} label="Water" value={score.avgWaterSecurity} />
         <MetricCard
-          icon={<CircleDollarSign size={16} />}
+          asset={generatedAssets.labels.coverage}
+          label="Sites"
+          value={builtSites.length}
+        />
+        <MetricCard
+          icon={<Zap size={16} />}
+          label="Latency"
+          value={score.avgLatency}
+        />
+        <MetricCard
+          asset={generatedAssets.labels.water}
+          label="Water"
+          value={score.avgWaterSecurity}
+        />
+        <MetricCard
+          asset={generatedAssets.labels.budget}
           label="Budget left"
           value={formatBudget(score.budgetRemaining)}
         />
@@ -305,11 +450,20 @@ function RunSummary({
         />
       </label>
       <div className="summary-actions">
-        <button className="primary-action" type="button" onClick={saveRun} disabled={saved}>
+        <button
+          className="primary-action"
+          type="button"
+          onClick={saveRun}
+          disabled={saved}
+        >
           <Trophy size={18} />
           {saved ? "Saved" : "Save score"}
         </button>
-        <button className="secondary-action" type="button" onClick={() => navigate("/leaderboard")}>
+        <button
+          className="secondary-action"
+          type="button"
+          onClick={() => navigate("/leaderboard")}
+        >
           Leaderboard
         </button>
         <button className="ghost-button" type="button" onClick={onRestart}>
@@ -338,7 +492,12 @@ function OnboardingOverlay({
 
   return (
     <div className="summary-overlay">
-      <section className="tutorial-card" role="dialog" aria-modal="true" aria-label="Game tutorial">
+      <section
+        className="tutorial-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Game tutorial"
+      >
         <div className="tutorial-kicker">
           <BookOpen size={18} />
           Tutorial
@@ -349,18 +508,27 @@ function OnboardingOverlay({
             <button
               key={mode.id}
               type="button"
-              className={mode.id === modeId ? "mode-option mode-option--active" : "mode-option"}
+              className={
+                mode.id === modeId
+                  ? "mode-option mode-option--active"
+                  : "mode-option"
+              }
               onClick={() => onModeChange(mode.id)}
             >
               <strong>{mode.label}</strong>
               <span>
-                {mode.maxPeriods} {mode.shortLabel.toLowerCase()}s, {formatClock(mode.secondsPerPeriod)} each
+                {mode.maxPeriods} {mode.shortLabel.toLowerCase()}s,{" "}
+                {formatClock(mode.secondsPerPeriod)} each
               </span>
               <small>{mode.description}</small>
             </button>
           ))}
         </div>
-        <button className="primary-action tutorial-start" type="button" onClick={onStart}>
+        <button
+          className="primary-action tutorial-start"
+          type="button"
+          onClick={onStart}
+        >
           <Clock3 size={18} />
           Start {selectedMode.shortLabel.toLowerCase()} clock
         </button>
@@ -369,26 +537,30 @@ function OnboardingOverlay({
             <span>1</span>
             <h3>Pick markets</h3>
             <p>
-              Click real US candidate markets on the atlas. Each build spends budget and adds MW,
-              latency reach, clean power, water security, and resilience.
+              Click real US candidate markets on the atlas. Each build spends
+              budget and adds MW, latency reach, clean power, water security,
+              and resilience.
             </p>
           </article>
           <article>
             <span>2</span>
             <h3>Watch the clock</h3>
             <p>
-              After this screen, each {selectedMode.shortLabel.toLowerCase()} advances automatically
-              every {formatClock(selectedMode.secondsPerPeriod)}. If the timer expires, that window is
-              missed and your final score takes a penalty.
+              After this screen, each {selectedMode.shortLabel.toLowerCase()}{" "}
+              advances automatically every{" "}
+              {formatClock(selectedMode.secondsPerPeriod)}. If the timer
+              expires, that window is missed and your final score takes a
+              penalty.
             </p>
           </article>
           <article>
             <span>3</span>
             <h3>Win or lose</h3>
             <p>
-              Win by finishing with {MAX_BUILDS} builds, at least {WIN_SCORE} points, and{" "}
-              {MIN_DEMAND_TO_WIN}% demand coverage. Lose if the planning window closes below either
-              threshold or you strand the budget.
+              Win by finishing with {MAX_BUILDS} builds, at least {WIN_SCORE}{" "}
+              points, and {MIN_DEMAND_TO_WIN}% demand coverage. Lose if the
+              planning window closes below either threshold or you strand the
+              budget.
             </p>
           </article>
         </div>
@@ -447,7 +619,9 @@ function PlayPage() {
     setSecondsLeft(mode.secondsPerPeriod);
   };
 
-  const progress = Math.round((Math.min(state.turn - 1, mode.maxPeriods) / mode.maxPeriods) * 100);
+  const progress = Math.round(
+    (Math.min(state.turn - 1, mode.maxPeriods) / mode.maxPeriods) * 100,
+  );
 
   return (
     <main className="play-page">
@@ -457,7 +631,11 @@ function PlayPage() {
           <h1>Build a national AI compute footprint</h1>
         </div>
         <div className="run-controls">
-          <button className="ghost-button" type="button" onClick={manuallyAdvancePeriod}>
+          <button
+            className="ghost-button"
+            type="button"
+            onClick={manuallyAdvancePeriod}
+          >
             <Clock3 size={16} />
             Advance {mode.shortLabel.toLowerCase()}
           </button>
@@ -469,21 +647,33 @@ function PlayPage() {
 
       <section className="score-band" aria-label="Run metrics">
         <MetricCard
-          icon={<Clock3 size={16} />}
+          asset={generatedAssets.labels.year}
           label={`${currentPeriodLabel} clock`}
           value={formatClock(secondsLeft)}
         />
-        <MetricCard icon={<MapPin size={16} />} label="Builds" value={`${builtSites.length}/${MAX_BUILDS}`} />
-        <MetricCard icon={<Award size={16} />} label="Score" value={score.score} />
         <MetricCard
-          icon={<CircleDollarSign size={16} />}
+          icon={<MapPin size={16} />}
+          label="Builds"
+          value={`${builtSites.length}/${MAX_BUILDS}`}
+        />
+        <MetricCard
+          asset={generatedAssets.labels.leaderboard}
+          label="Score"
+          value={score.score}
+        />
+        <MetricCard
+          asset={generatedAssets.labels.budget}
           label="Budget"
           value={formatBudget(score.budgetRemaining)}
           tone={score.budgetRemaining < 20 ? "warning" : undefined}
         />
-        <MetricCard icon={<Zap size={16} />} label="Demand" value={`${score.demandCoverage}%`} />
         <MetricCard
-          icon={<BatteryCharging size={16} />}
+          asset={generatedAssets.labels.demand}
+          label="Demand"
+          value={`${score.demandCoverage}%`}
+        />
+        <MetricCard
+          asset={generatedAssets.labels.power}
           label="Clean power"
           value={score.avgCleanPower || "-"}
         />
@@ -492,6 +682,7 @@ function PlayPage() {
       <div className="turn-progress" aria-label="Turn progress">
         <span style={{ width: `${progress}%` }} />
       </div>
+      <InfrastructureStack builtCount={builtSites.length} />
 
       <section className="game-layout">
         <div className="map-stage">
@@ -505,7 +696,9 @@ function PlayPage() {
           <UnitedStatesMap
             builtSiteIds={state.builtSiteIds}
             selectedSiteId={state.selectedSiteId}
-            onSelectSite={(siteId) => setState((current) => ({ ...current, selectedSiteId: siteId }))}
+            onSelectSite={(siteId) =>
+              setState((current) => ({ ...current, selectedSiteId: siteId }))
+            }
           />
         </div>
         <SitePanel state={state} setState={setState} mode={mode} />

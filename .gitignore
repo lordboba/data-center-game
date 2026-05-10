@@ -1,6 +1,9 @@
 node_modules/
 dist/
 .vercel/
+.DS_Store
+.next/
+test-results/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts

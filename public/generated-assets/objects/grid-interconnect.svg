@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220" role="img" aria-label="Grid Interconnect">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="panelGrad" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#172721" offset="0"/>
+      <stop stop-color="#08130f" offset="1"/>
+    </linearGradient>
+    <pattern id="grid" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#6d8478" stroke-width="0.45" opacity="0.25"/>
+    </pattern>
+  </defs>
+  <rect width="320" height="220" rx="18" fill="url(#panelGrad)"/>
+     <rect x="12" y="12" width="296" height="196" rx="14" fill="url(#grid)" stroke="#f7c873" stroke-width="4"/>
+     <g filter="url(#glow)" stroke-linecap="round" stroke-linejoin="round">
+       <path d="M76 164l44-112 42 112M120 52l42 112M99 108h42M86 138h64" fill="none" stroke="#f7c873" stroke-width="7"/>
+       <path d="M170 164l44-112 42 112M214 52l42 112M193 108h42M180 138h64" fill="none" stroke="#7bdff2" stroke-width="7"/>
+       <path d="M42 74c42-22 75-22 118 0s76 22 118 0" fill="none" stroke="#f4fff9" stroke-width="3" opacity="0.7"/>
+     </g>
+     <text x="160" y="197" text-anchor="middle" fill="#f4fff9" font-family="'Geist Mono', 'SFMono-Regular', 'Menlo', monospace" font-size="19" font-weight="900" letter-spacing="0">Grid Interconnect</text>
+</svg>

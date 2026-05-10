@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "tsc --noEmit && vite build",
+    "assets": "node scripts/generate-assets.mjs",
+    "build": "npm run assets && tsc --noEmit && vite build",
     "lint": "eslint .",
+    "test": "npm run lint && npm run build",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

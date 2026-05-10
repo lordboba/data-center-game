@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560" role="img" aria-label="United States data center siting map">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <linearGradient id="panelGrad" x1="0" x2="1" y1="0" y2="1">
+      <stop stop-color="#172721" offset="0"/>
+      <stop stop-color="#08130f" offset="1"/>
+    </linearGradient>
+    <pattern id="grid" width="14" height="14" patternUnits="userSpaceOnUse">
+      <path d="M 14 0 L 0 0 0 14" fill="none" stroke="#6d8478" stroke-width="0.45" opacity="0.25"/>
+    </pattern>
+  </defs>
+  <rect width="980" height="560" fill="#08130f"/>
+     <rect width="980" height="560" fill="url(#grid)" opacity="0.82"/>
+     <path d="M96 188l94-48 142 8 96-56 134 20 94 58 130 24 98 86-54 104-130 56-178-10-146 42-152-42-128 16-38-102 44-78z" fill="#12251f" stroke="#7cf2b0" stroke-width="5" stroke-linejoin="round"/>
+     <path d="M72 196l-46 66 30 88 60-28 10-72z" fill="#142820" stroke="#32c4b5" stroke-width="4"/>
+     <path d="M816 292l92 6 28 44-62 36-72-20z" fill="#142820" stroke="#32c4b5" stroke-width="4"/>
+     <path d="M160 234h150M364 172l-36 248M520 132l-20 320M642 188l-38 236M748 226l-78 180M212 400l500-8" stroke="#6d8478" stroke-width="2" opacity="0.45"/>
+     <text x="34" y="54" fill="#f4fff9" font-family="'Geist Mono', 'SFMono-Regular', 'Menlo', monospace" font-size="28" font-weight="900">UNITED STATES SITING BOARD</text>
+     <text x="36" y="88" fill="#7bdff2" font-family="'Geist Mono', 'SFMono-Regular', 'Menlo', monospace" font-size="16" font-weight="800">STATE DATA MODIFIES COST, PERMITS, WATER, AND PUBLIC SUPPORT</text>
+</svg>

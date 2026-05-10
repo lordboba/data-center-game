@@ -1,0 +1,59 @@
+{
+  "generatedAt": "2026-05-10T05:33:33.273Z",
+  "visualSystem": {
+    "font": "'Geist Mono', 'SFMono-Regular', 'Menlo', monospace",
+    "palette": {
+      "ink": "#08130f",
+      "panel": "#101c18",
+      "panel2": "#172721",
+      "steel": "#9fb6aa",
+      "mint": "#7cf2b0",
+      "teal": "#32c4b5",
+      "cyan": "#7bdff2",
+      "amber": "#f7c873",
+      "red": "#ff6b6b",
+      "blue": "#7aa7ff",
+      "green": "#9cf27e",
+      "white": "#f4fff9",
+      "muted": "#6d8478"
+    },
+    "radius": 8,
+    "assetKind": "deterministic SVG images"
+  },
+  "objects": {
+    "gpu-pod": "/generated-assets/objects/gpu-pod.svg",
+    "frontier-campus": "/generated-assets/objects/frontier-campus.svg",
+    "grid-interconnect": "/generated-assets/objects/grid-interconnect.svg",
+    "renewable-ppa": "/generated-assets/objects/renewable-ppa.svg",
+    "gas-peaker": "/generated-assets/objects/gas-peaker.svg",
+    "chiller-yard": "/generated-assets/objects/chiller-yard.svg",
+    "water-reuse": "/generated-assets/objects/water-reuse.svg",
+    "community-compact": "/generated-assets/objects/community-compact.svg",
+    "efficiency-lab": "/generated-assets/objects/efficiency-lab.svg",
+    "nuclear-smr": "/generated-assets/objects/nuclear-smr.svg",
+    "construction": "/generated-assets/objects/construction.svg",
+    "empty-tile": "/generated-assets/objects/empty-tile.svg"
+  },
+  "labels": {
+    "compute": "/generated-assets/labels/compute.svg",
+    "power": "/generated-assets/labels/power.svg",
+    "cooling": "/generated-assets/labels/cooling.svg",
+    "water": "/generated-assets/labels/water.svg",
+    "support": "/generated-assets/labels/support.svg",
+    "policy": "/generated-assets/labels/policy.svg",
+    "budget": "/generated-assets/labels/budget.svg",
+    "emissions": "/generated-assets/labels/emissions.svg",
+    "demand": "/generated-assets/labels/demand.svg",
+    "coverage": "/generated-assets/labels/coverage.svg",
+    "analytics": "/generated-assets/labels/analytics.svg",
+    "leaderboard": "/generated-assets/labels/leaderboard.svg",
+    "year": "/generated-assets/labels/year.svg",
+    "risk": "/generated-assets/labels/risk.svg"
+  },
+  "ui": {
+    "title-lockup": "/generated-assets/ui/title-lockup.svg",
+    "command-room": "/generated-assets/ui/command-room.svg",
+    "usa-siting-map": "/generated-assets/ui/usa-siting-map.svg",
+    "meter-strip": "/generated-assets/ui/meter-strip.svg"
+  }
+}
